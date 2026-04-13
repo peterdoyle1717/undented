@@ -1,0 +1,57 @@
+#!/usr/local/bin/python3
+"""
+Read plantri planar_code binary output from stdin, write triangulations in
+poly format (a,b,c;a,b,c;...) to stdout.
+
+Filters out graphs with any vertex degree outside [4,6].
+
+planar_code format: optional >>planar_code<< header, then for each graph:
+  1 byte n (vertex count), then for vertices 1..n: clockwise neighbor
+  bytes terminated by a 0 byte.
+
+Face extraction: for vertex v with clockwise neighbors [w0, w1, ...],
+the faces are (v, w_i, w_{i+1 mod d}).  We emit each face exactly once
+by only outputting it when v is the smallest of its three vertices.
+"""
+
+import sys
+
+def run():
+    data = sys.stdin.buffer.read()
+    pos = 0
+
+    # skip optional header (no newline follows it in the binary format)
+    if data[pos:pos+15] == b'>>planar_code<<':
+        pos += 15
+
+    out = sys.stdout.write
+
+    while pos < len(data):
+        n = data[pos]; pos += 1
+        if n == 0:
+            break
+
+        nbrs = []
+        for _ in range(n):
+            nb = []
+            while data[pos] != 0:
+                nb.append(data[pos])
+                pos += 1
+            pos += 1  # skip terminating 0
+            nbrs.append(nb)
+
+        degrees = [len(nb) for nb in nbrs]
+        if min(degrees) < 4 or max(degrees) > 6:
+            continue
+
+        faces = []
+        for v, nb in enumerate(nbrs, 1):
+            d = len(nb)
+            for i in range(d):
+                w0, w1 = nb[i], nb[(i + 1) % d]
+                if v < w0 and v < w1:
+                    faces.append((v, w0, w1))
+
+        out(';'.join(f'{a},{b},{c}' for a, b, c in faces) + '\n')
+
+run()

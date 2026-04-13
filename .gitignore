@@ -1,0 +1,13 @@
+bin/
+data/seed/
+data/prime/
+data/obj/
+data/polished/
+data/proofs/
+run/logs/
+run/tmp/
+run/shards/
+__pycache__/
+*.pyc
+*.o
+.DS_Store

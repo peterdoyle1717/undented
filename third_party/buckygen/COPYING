@@ -1,0 +1,5 @@
+buckygen is Copyright (C) Gunnar Brinkmann and Jan Goedgebeur.
+Licensed under the GNU General Public License v3.
+Source: https://users.cecs.anu.edu.au/~bdm/plantri/
+
+The files buckygen.c and splay.c are unmodified upstream source.
