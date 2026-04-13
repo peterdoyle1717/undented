@@ -24,6 +24,7 @@ RUN   = run
 BIN   = bin
 
 BUCKYGEN     = $(BIN)/buckygen
+CLERS        = $(BIN)/clers
 CLERS_NAME   = $(BIN)/clers_name
 GROW_STEP    = $(BIN)/grow_step
 SOLVER       = $(BIN)/neoeuc_c
@@ -38,13 +39,16 @@ all: primes solve prove
 
 # ── tools ────────────────────────────────────────────────────────────────
 
-tools: $(BUCKYGEN) $(CLERS_NAME) $(GROW_STEP) $(SOLVER) $(POLISHER)
+tools: $(BUCKYGEN) $(CLERS) $(CLERS_NAME) $(GROW_STEP) $(SOLVER) $(POLISHER)
 
 $(BIN):
 	mkdir -p $(BIN)
 
 $(BUCKYGEN): third_party/buckygen/buckygen.c third_party/buckygen/splay.c | $(BIN)
 	cc -O3 -w -o $@ $<
+
+$(CLERS): src/clers.c | $(BIN)
+	cc -O3 -o $@ $<
 
 $(CLERS_NAME): src/clers_name.c | $(BIN)
 	cc -O3 -o $@ $<
