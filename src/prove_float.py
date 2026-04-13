@@ -289,8 +289,94 @@ def compute_undented(verts, faces):
     return min_turning, min_turning > err_bound
 
 
+def tri_tri_intersect(p0, p1, p2, q0, q1, q2):
+    """Test whether two triangles intersect (Möller algorithm).
+    Returns True if the interiors/edges of the triangles intersect.
+    Triangles sharing an edge or vertex are handled: shared geometry
+    is not counted as intersection, only genuine crossing."""
+    # Plane of triangle 1
+    e1 = p1 - p0; e2 = p2 - p0
+    n1 = np.cross(e1, e2)
+    d1 = -n1 @ p0
+    # Signed distances of q vertices to plane 1
+    dq0 = n1 @ q0 + d1; dq1 = n1 @ q1 + d1; dq2 = n1 @ q2 + d1
+    # All on same side → no intersection
+    if dq0 * dq1 > 0 and dq0 * dq2 > 0:
+        return False
+    # Plane of triangle 2
+    f1 = q1 - q0; f2 = q2 - q0
+    n2 = np.cross(f1, f2)
+    d2 = -n2 @ q0
+    dp0 = n2 @ p0 + d2; dp1 = n2 @ p1 + d2; dp2 = n2 @ p2 + d2
+    if dp0 * dp1 > 0 and dp0 * dp2 > 0:
+        return False
+    # Coplanar case: use 2D projection
+    if np.linalg.norm(n1) < 1e-30:
+        return False
+    # Intersection line direction
+    D = np.cross(n1, n2)
+    if np.linalg.norm(D) < 1e-30:
+        return False  # coplanar — skip (conservative: no intersection)
+    # Project onto axis of maximum component of D
+    ax = np.argmax(np.abs(D))
+    pp = np.array([p0[ax], p1[ax], p2[ax]])
+    qq = np.array([q0[ax], q1[ax], q2[ax]])
+    dp = np.array([dp0, dp1, dp2])
+    dq = np.array([dq0, dq1, dq2])
+    # Compute intervals on intersection line for each triangle
+    def interval(proj, dist):
+        # Find the lone vertex (opposite sign)
+        signs = np.sign(dist)
+        if signs[0] == signs[1]:
+            lone = 2; pair = (0, 1)
+        elif signs[0] == signs[2]:
+            lone = 1; pair = (0, 2)
+        else:
+            lone = 0; pair = (1, 2)
+        t0 = proj[pair[0]] + (proj[lone] - proj[pair[0]]) * dist[pair[0]] / (dist[pair[0]] - dist[lone])
+        t1 = proj[pair[1]] + (proj[lone] - proj[pair[1]]) * dist[pair[1]] / (dist[pair[1]] - dist[lone])
+        return (min(t0, t1), max(t0, t1))
+    # Handle vertices exactly on the plane (distance ≈ 0)
+    eps = 1e-12 * max(np.linalg.norm(n1), np.linalg.norm(n2))
+    if abs(dp0) < eps and abs(dp1) < eps and abs(dp2) < eps:
+        return False  # coplanar
+    if abs(dq0) < eps and abs(dq1) < eps and abs(dq2) < eps:
+        return False
+    # Need at least one vertex on each side for each triangle
+    sp = np.sign(dp); sq = np.sign(dq)
+    sp[np.abs(dp) < eps] = 0; sq[np.abs(dq) < eps] = 0
+    if np.all(sp >= 0) or np.all(sp <= 0):
+        return False
+    if np.all(sq >= 0) or np.all(sq <= 0):
+        return False
+    i1 = interval(pp, dp)
+    i2 = interval(qq, dq)
+    # Overlap test with tolerance for shared edges
+    overlap = min(i1[1], i2[1]) - max(i1[0], i2[0])
+    return overlap > eps
+
+
+def check_embedded(verts, faces):
+    """Check that no two triangles intersect.
+    Tests all pairs (including adjacent). Returns (ok, n_intersecting)."""
+    F = len(faces)
+    n_bad = 0
+    for i in range(F):
+        a, b, c = faces[i]
+        for j in range(i + 1, F):
+            d, e, f = faces[j]
+            # Skip if they share 2+ vertices (same edge or same face)
+            shared = len({a, b, c} & {d, e, f})
+            if shared >= 2:
+                continue
+            if tri_tri_intersect(verts[a], verts[b], verts[c],
+                                 verts[d], verts[e], verts[f]):
+                n_bad += 1
+    return n_bad == 0, n_bad
+
+
 def prove(verts, faces, verbose=False):
-    """Run the 5-check existence proof. Returns (success, message, details)."""
+    """Run the existence proof. Returns (success, message, details)."""
     V = len(verts)
     edges = edge_list(faces)
     E = len(edges)
@@ -306,6 +392,14 @@ def prove(verts, faces, verbose=False):
     vp(f'  min turning = {min_turning:.6e}')
     if not undented_ok:
         return False, f'Failed: dented (min turning = {min_turning:.6e})', details
+
+    # Check 0b: embedded (no triangle-triangle intersections)
+    vp(f'\nCheck 0b: embedded')
+    embed_ok, n_bad = check_embedded(verts, faces)
+    details['n_intersecting_pairs'] = n_bad
+    vp(f'  intersecting pairs = {n_bad}')
+    if not embed_ok:
+        return False, f'Failed: self-intersecting ({n_bad} pairs)', details
 
     # Inequality 1: d|V| ≥ |E|
     vp(f'\nInequality 1: 3·{V} = {3*V} ≥ {E} = |E|')
