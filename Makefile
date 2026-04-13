@@ -25,12 +25,9 @@ BIN   = bin
 
 BUCKYGEN     = $(BIN)/buckygen
 CLERS        = $(BIN)/clers
-CLERS_NAME   = $(BIN)/clers_name
 GROW_STEP    = $(BIN)/grow_step
 SOLVER       = $(BIN)/neoeuc_c
-POLISHER     = $(BIN)/newton_polish
 PLANTRI2POLY = src/plantri_to_poly
-BIN2OBJ      = src/bin2obj.py
 PROVER       = src/prove_float.py
 
 .PHONY: all tools seeds primes solve prove status clean
@@ -39,7 +36,7 @@ all: primes solve prove
 
 # ── tools ────────────────────────────────────────────────────────────────
 
-tools: $(BUCKYGEN) $(CLERS) $(CLERS_NAME) $(GROW_STEP) $(SOLVER) $(POLISHER)
+tools: $(BUCKYGEN) $(CLERS) $(GROW_STEP) $(SOLVER)
 
 $(BIN):
 	mkdir -p $(BIN)
@@ -50,21 +47,15 @@ $(BUCKYGEN): third_party/buckygen/buckygen.c third_party/buckygen/splay.c | $(BI
 $(CLERS): src/clers.c | $(BIN)
 	cc -O3 -o $@ $<
 
-$(CLERS_NAME): src/clers_name.c | $(BIN)
-	cc -O3 -o $@ $<
-
 $(GROW_STEP): src/grow_step.c | $(BIN)
 	cc -O3 -o $@ $<
 
 $(SOLVER): src/neoeuc_c.c | $(BIN)
 	cc -O3 -o $@ $< -lm
 
-$(POLISHER): src/newton_polish.c | $(BIN)
-	cc -O3 -o $@ $< -lm -llapack -lblas
-
 # ── seeds ────────────────────────────────────────────────────────────────
 
-seeds: $(BUCKYGEN) $(CLERS_NAME)
+seeds: $(BUCKYGEN) $(CLERS)
 	@mkdir -p $(DATA)/seed $(RUN)/tmp $(RUN)/logs
 	@for v in $$(seq 4 $(VMAX)); do \
 	  out=$(DATA)/seed/$$v.txt.gz; \
@@ -76,7 +67,7 @@ seeds: $(BUCKYGEN) $(CLERS_NAME)
 	  else \
 	    nice -n $(NICE) parallel -j $(JOBS) \
 	      "$(BUCKYGEN) $$v {}/$(SHARDS_SEED) 2>/dev/null \
-	       | python3 $(PLANTRI2POLY) | $(CLERS_NAME) \
+	       | python3 $(PLANTRI2POLY) | $(CLERS) name \
 	       | sort > $(RUN)/tmp/seed_$${v}_{}.sorted" \
 	      ::: $$(seq 0 $$(($(SHARDS_SEED) - 1))) 2>/dev/null; \
 	    if ls $(RUN)/tmp/seed_$${v}_*.sorted 1>/dev/null 2>&1; then \
@@ -91,7 +82,7 @@ seeds: $(BUCKYGEN) $(CLERS_NAME)
 
 # ── primes ───────────────────────────────────────────────────────────────
 
-primes: seeds $(GROW_STEP) $(CLERS_NAME)
+primes: seeds $(GROW_STEP) $(CLERS)
 	@mkdir -p $(DATA)/prime $(RUN)/tmp $(RUN)/logs
 	@if [ ! -f $(DATA)/prime/4.txt.gz ]; then \
 	  echo CCAE | gzip > $(DATA)/prime/4.txt.gz; echo "prime v=4: 1"; fi
@@ -137,7 +128,7 @@ primes: seeds $(GROW_STEP) $(CLERS_NAME)
 # ── solve ────────────────────────────────────────────────────────────────
 
 solve: primes $(SOLVER)
-	@mkdir -p $(RUN)/tmp $(RUN)/logs
+	@mkdir -p $(RUN)/logs
 	@for v in $$(seq 4 $(VMAX)); do \
 	  [ $$v -eq 5 ] && continue; \
 	  objdir=$(DATA)/obj/$$v; mkdir -p "$$objdir"; \
@@ -148,9 +139,8 @@ solve: primes $(SOLVER)
 	  have=$$(find "$$objdir" -name '*.obj' -o -name '*.failed' 2>/dev/null | wc -l); \
 	  [ "$$have" -ge "$$n" ] && continue; \
 	  echo "solve v=$$v ($$n nets)"; \
-	  $(ZC) "$$src" 2>/dev/null | nice -n $(NICE) $(SOLVER) \
-	    > $(RUN)/tmp/$$v.bin 2> $(RUN)/logs/solve_$$v.log; \
-	  python3 $(BIN2OBJ) "$$src" $(RUN)/tmp/$$v.bin "$$objdir/"; \
+	  $(ZC) "$$src" 2>/dev/null | nice -n $(NICE) $(SOLVER) "$$objdir" \
+	    2> $(RUN)/logs/solve_$$v.log; \
 	done
 
 # ── prove ────────────────────────────────────────────────────────────────

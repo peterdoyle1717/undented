@@ -520,11 +520,15 @@ static void write_frame_euc(float *out_buf, double coords[][3]){
 
 /* ── main ────────────────────────────────────────────────────────────────── */
 
-int main(void){
+int main(int argc, char **argv){
     static char line[MAXCODE];
     static float u[MAXV], hz[MAXV*3];
     static double out_buf[MAXV*3];
     static double coords[MAXV+1][3];
+    static char outdir[4096];
+
+    outdir[0]='\0';
+    if(argc>=2) strncpy(outdir,argv[1],sizeof(outdir)-1);
 
     int n = 1;    /* rho schedule steps (bisection does the rest) */
     long nets=0, net_failed=0;
@@ -634,22 +638,45 @@ int main(void){
                     ok?"CONVERGED":"FAILED", und?"UNDENTED":"DENTED");
         }
 
-        /* write NV*3 doubles: reference triangle + solution (or NaN if failed) */
-        if(net_ok){
-            out_buf[0]=EC[1][0]; out_buf[1]=EC[1][1]; out_buf[2]=EC[1][2];
-            out_buf[3]=EC[2][0]; out_buf[4]=EC[2][1]; out_buf[5]=EC[2][2];
-            out_buf[6]=EC[3][0]; out_buf[7]=EC[3][1]; out_buf[8]=EC[3][2];
-            for(int v=4;v<=NV;v++){
-                out_buf[3*(v-1)  ]=e_xvec[3*(v-4)];
-                out_buf[3*(v-1)+1]=e_xvec[3*(v-4)+1];
-                out_buf[3*(v-1)+2]=e_xvec[3*(v-4)+2];
+        /* write OBJ or .failed */
+        if(outdir[0]){
+            char path[4096];
+            if(net_ok){
+                snprintf(path,sizeof(path),"%s/%s.obj",outdir,line);
+                FILE *fp=fopen(path,"w");
+                if(fp){
+                    fprintf(fp,"v %.17g %.17g %.17g\n",EC[1][0],EC[1][1],EC[1][2]);
+                    fprintf(fp,"v %.17g %.17g %.17g\n",EC[2][0],EC[2][1],EC[2][2]);
+                    fprintf(fp,"v %.17g %.17g %.17g\n",EC[3][0],EC[3][1],EC[3][2]);
+                    for(int v=4;v<=NV;v++)
+                        fprintf(fp,"v %.17g %.17g %.17g\n",e_xvec[3*(v-4)],e_xvec[3*(v-4)+1],e_xvec[3*(v-4)+2]);
+                    for(int i=0;i<NF;i++)
+                        fprintf(fp,"f %d %d %d\n",F[i].a,F[i].b,F[i].c);
+                    fclose(fp);
+                }
+            } else {
+                snprintf(path,sizeof(path),"%s/%s.failed",outdir,line);
+                fclose(fopen(path,"w"));
+                net_failed++;
             }
         } else {
-            for(int i=0;i<NV*3;i++) out_buf[i]=NAN;
+            /* legacy binary mode: NV*3 doubles to stdout */
+            if(net_ok){
+                out_buf[0]=EC[1][0]; out_buf[1]=EC[1][1]; out_buf[2]=EC[1][2];
+                out_buf[3]=EC[2][0]; out_buf[4]=EC[2][1]; out_buf[5]=EC[2][2];
+                out_buf[6]=EC[3][0]; out_buf[7]=EC[3][1]; out_buf[8]=EC[3][2];
+                for(int v=4;v<=NV;v++){
+                    out_buf[3*(v-1)  ]=e_xvec[3*(v-4)];
+                    out_buf[3*(v-1)+1]=e_xvec[3*(v-4)+1];
+                    out_buf[3*(v-1)+2]=e_xvec[3*(v-4)+2];
+                }
+            } else {
+                for(int i=0;i<NV*3;i++) out_buf[i]=NAN;
+                net_failed++;
+            }
+            fwrite(out_buf,sizeof(double),NV*3,stdout);
         }
-        fwrite(out_buf,sizeof(double),NV*3,stdout);
 
-        if(!net_ok) net_failed++;
         build_clear();
         nets++;
     }
