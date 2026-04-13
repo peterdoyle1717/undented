@@ -215,8 +215,85 @@ def compute_collision_distance(verts, faces, edges):
     return cd_float, cd_lower
 
 
+def compute_undented(verts, faces):
+    """Check that every vertex has strictly positive turning sum.
+
+    The turning sum at vertex v is the sum of signed spherical angles
+    around the link polygon (consecutive normalized edge directions).
+    Undented means every turning sum > 0.
+
+    Returns (min_turning, undented_ok) where undented_ok accounts
+    for IEEE error: we require min_turning > V·k·ε for safety.
+    """
+    V = len(verts)
+
+    # Build adjacency: for each vertex, cyclic neighbor ring
+    edge_map = {}
+    for a, b, c in faces:
+        edge_map[(a, b)] = c
+        edge_map[(b, c)] = a
+        edge_map[(c, a)] = b
+
+    def cyclic_ring(v):
+        start = None
+        for (u, w), x in edge_map.items():
+            if u == v:
+                start = w
+                break
+        if start is None:
+            return []
+        ring = [start]
+        cur = start
+        for _ in range(20):
+            nxt = edge_map.get((v, cur))
+            if nxt is None or nxt == start:
+                break
+            ring.append(nxt)
+            cur = nxt
+        return ring
+
+    def signed_sph_angle(a, b, c):
+        """Signed angle at b in the spherical triangle (a, b, c)."""
+        bc = np.cross(b, c)
+        num = a @ bc
+        den = (a @ b) * (b @ c) - (a @ c)
+        return np.arctan2(num, den)
+
+    min_turning = float('inf')
+    total_turning = 0.0
+    for v in range(V):
+        ring = cyclic_ring(v)
+        k = len(ring)
+        if k < 3:
+            continue
+        # Normalized edge directions
+        dirs = []
+        for w in ring:
+            e = verts[w] - verts[v]
+            L = np.linalg.norm(e)
+            if L < 1e-30:
+                L = 1e-30
+            dirs.append(e / L)
+        # Sum signed spherical angles around the link
+        tv = 0.0
+        for i in range(k):
+            tv += signed_sph_angle(dirs[(i-1) % k], dirs[i], dirs[(i+1) % k])
+        total_turning += tv
+        if tv < min_turning:
+            min_turning = tv
+
+    # Flip if overall orientation is negative
+    if total_turning < 0:
+        min_turning = -min_turning
+
+    # Error bound: each signed_sph_angle has error ≤ ~10ε,
+    # summing k angles gives ~10kε. Use 100·V·ε conservatively.
+    err_bound = 100 * V * EPS
+    return min_turning, min_turning > err_bound
+
+
 def prove(verts, faces, verbose=False):
-    """Run the 4-inequality existence proof. Returns (success, message, details)."""
+    """Run the 5-check existence proof. Returns (success, message, details)."""
     V = len(verts)
     edges = edge_list(faces)
     E = len(edges)
@@ -224,6 +301,14 @@ def prove(verts, faces, verbose=False):
     details = {}
 
     vp = print if verbose else lambda *a, **k: None
+
+    # Check 0: undented (all vertex turning sums > 0)
+    vp(f'\nCheck 0: undented')
+    min_turning, undented_ok = compute_undented(verts, faces)
+    details['min_turning'] = min_turning
+    vp(f'  min turning = {min_turning:.6e}')
+    if not undented_ok:
+        return False, f'Failed: dented (min turning = {min_turning:.6e})', details
 
     # Inequality 1: d|V| ≥ |E|
     vp(f'\nInequality 1: 3·{V} = {3*V} ≥ {E} = |E|')
