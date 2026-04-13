@@ -395,7 +395,7 @@ static const double EC[4][3]={{0,0,0},{0,0,0.5},{0,0,-0.5},{0.8660254037844387,0
 static int undented_check(double coords[][3]);  /* forward decl */
 static int euclid_newton(int *iters_out, double *res_out, int *bt_total_out){
     int n=3*(NV-3); double res=1e30; int iter; int lufail=0; int bt_total=0;
-    for(iter=0;iter<2000;iter++){
+    for(iter=0;iter<50;iter++){
         res=0;
         for(int k=0;k<n_edges;k++){
             int i=eu[k],j=ev[k];
@@ -591,6 +591,41 @@ int main(void){
             }
             int iters; double res; int bt_total;
             int ok=euclid_newton(&iters,&res,&bt_total);
+            /* polish: Newton with backtracking to avoid worsening residual */
+            if(ok){
+                for(int pi=0;pi<20&&res>1e-14;pi++){
+                    res=0;
+                    for(int k=0;k<n_edges;k++){
+                        int i=eu[k],j=ev[k];
+                        double dx=EX(i)-EX(j),dy=EY(i)-EY(j),dz=EZ(i)-EZ(j);
+                        NFvec[k]=dx*dx+dy*dy+dz*dz-1.0;
+                        double af=fabs(NFvec[k]);if(af>res)res=af;
+                    }
+                    if(res<1e-14) break;
+                    memset(NJmat,0,sizeof(double)*(size_t)n*MAXFN);
+                    for(int k=0;k<n_edges;k++){
+                        int i=eu[k],j=ev[k];
+                        double dx=EX(i)-EX(j),dy=EY(i)-EY(j),dz=EZ(i)-EZ(j);
+                        if(i>=4){int ci=3*(i-4);NJmat[k][ci]+=2*dx;NJmat[k][ci+1]+=2*dy;NJmat[k][ci+2]+=2*dz;}
+                        if(j>=4){int cj=3*(j-4);NJmat[k][cj]-=2*dx;NJmat[k][cj+1]-=2*dy;NJmat[k][cj+2]-=2*dz;}
+                    }
+                    for(int k=0;k<n;k++) NFvec[k]=-NFvec[k];
+                    if(lu_solve_n(n)<0) break;
+                    double step=1.0;
+                    for(int bt=0;bt<20;bt++,step*=0.5){
+                        double res2=0;
+                        for(int k=0;k<n_edges;k++){
+                            int i=eu[k],j=ev[k];
+                            double dx=(i>=4?EX(i)+step*NFvec[3*(i-4)]:EX(i))-(j>=4?EX(j)+step*NFvec[3*(j-4)]:EX(j));
+                            double dy=(i>=4?EY(i)+step*NFvec[3*(i-4)+1]:EY(i))-(j>=4?EY(j)+step*NFvec[3*(j-4)+1]:EY(j));
+                            double dz=(i>=4?EZ(i)+step*NFvec[3*(i-4)+2]:EZ(i))-(j>=4?EZ(j)+step*NFvec[3*(j-4)+2]:EZ(j));
+                            double af=fabs(dx*dx+dy*dy+dz*dz-1.0);if(af>res2)res2=af;
+                        }
+                        if(res2<res) break;
+                    }
+                    for(int v=4;v<=NV;v++){e_xvec[3*(v-4)]+=step*NFvec[3*(v-4)];e_xvec[3*(v-4)+1]+=step*NFvec[3*(v-4)+1];e_xvec[3*(v-4)+2]+=step*NFvec[3*(v-4)+2];}
+                }
+            }
             write_frame_euc(NULL, coords);
             int und=undented_check(coords);
             if(!ok||!und) net_ok=0;
