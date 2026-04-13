@@ -526,7 +526,7 @@ int main(void){
     static double out_buf[MAXV*3];
     static double coords[MAXV+1][3];
 
-    int n = 12;   /* rho schedule steps */
+    int n = 1;    /* rho schedule steps (bisection does the rest) */
     long nets=0, net_failed=0;
 
     while(fgets(line,sizeof(line),stdin)){
