@@ -155,29 +155,21 @@ solve: primes $(SOLVER)
 
 # ── prove ────────────────────────────────────────────────────────────────
 
-prove: solve $(POLISHER)
-	@mkdir -p $(DATA)/proofs $(RUN)/tmp
+prove: solve
+	@mkdir -p $(DATA)/proofs
 	@: > $(DATA)/proofs/failures.txt
 	@for v in $$(seq 4 $(VMAX)); do \
 	  [ $$v -eq 5 ] && continue; \
 	  objdir=$(DATA)/obj/$$v; \
-	  poldir=$(DATA)/polished/$$v; \
 	  n=$$(find "$$objdir" -name '*.obj' 2>/dev/null | wc -l); \
 	  [ "$$n" -eq 0 ] && continue; \
-	  mkdir -p "$$poldir"; \
-	  have=$$(find "$$poldir" -name '*.obj' 2>/dev/null | wc -l); \
-	  if [ "$$have" -lt "$$n" ]; then \
-	    echo "polish v=$$v ($$n nets)"; \
-	    find "$$objdir" -name '*.obj' | nice -n $(NICE) parallel -j $(JOBS) \
-	      "$(POLISHER) < {} > $$poldir/{/}"; \
-	  fi; \
 	  echo "prove v=$$v ($$n nets)"; \
 	  if [ "$$n" -gt 1000 ] && command -v parallel >/dev/null 2>&1; then \
-	    find "$$poldir" -name '*.obj' | nice -n $(NICE) parallel -j $(JOBS) \
+	    find "$$objdir" -name '*.obj' | nice -n $(NICE) parallel -j $(JOBS) \
 	      "python3 $(PROVER) {}" 2>/dev/null \
 	      > $(DATA)/proofs/$${v}_float.txt; \
 	  else \
-	    nice -n $(NICE) python3 $(PROVER) "$$poldir/" \
+	    nice -n $(NICE) python3 $(PROVER) "$$objdir/" \
 	      > $(DATA)/proofs/$${v}_float.txt 2>&1; \
 	  fi; \
 	  grep "^#" $(DATA)/proofs/$${v}_float.txt; \
