@@ -259,7 +259,7 @@ def compute_undented(verts, faces):
         den = (a @ b) * (b @ c) - (a @ c)
         return np.arctan2(num, den)
 
-    min_turning = float('inf')
+    turnings = []
     total_turning = 0.0
     for v in range(V):
         ring = cyclic_ring(v)
@@ -279,12 +279,13 @@ def compute_undented(verts, faces):
         for i in range(k):
             tv += signed_sph_angle(dirs[(i-1) % k], dirs[i], dirs[(i+1) % k])
         total_turning += tv
-        if tv < min_turning:
-            min_turning = tv
+        turnings.append(tv)
 
-    # Flip if overall orientation is negative
+    # Flip all signs if overall orientation is negative
     if total_turning < 0:
-        min_turning = -min_turning
+        turnings = [-t for t in turnings]
+
+    min_turning = min(turnings) if turnings else 0.0
 
     # Error bound: each signed_sph_angle has error ≤ ~10ε,
     # summing k angles gives ~10kε. Use 100·V·ε conservatively.
