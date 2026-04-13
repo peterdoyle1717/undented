@@ -168,8 +168,15 @@ prove: solve $(POLISHER)
 	      "$(POLISHER) < {} > $$poldir/{/}"; \
 	  fi; \
 	  echo "prove v=$$v ($$n nets)"; \
-	  nice -n $(NICE) python3 $(PROVER) "$$poldir/" 2>&1 \
-	    | tee $(DATA)/proofs/$${v}_float.txt | grep "^#"; \
+	  if [ "$$n" -gt 1000 ] && command -v parallel >/dev/null 2>&1; then \
+	    find "$$poldir" -name '*.obj' | nice -n $(NICE) parallel -j $(JOBS) \
+	      "python3 $(PROVER) {}" 2>/dev/null \
+	      > $(DATA)/proofs/$${v}_float.txt; \
+	  else \
+	    nice -n $(NICE) python3 $(PROVER) "$$poldir/" \
+	      > $(DATA)/proofs/$${v}_float.txt 2>&1; \
+	  fi; \
+	  grep "^#" $(DATA)/proofs/$${v}_float.txt; \
 	  grep FAIL $(DATA)/proofs/$${v}_float.txt >> $(DATA)/proofs/failures.txt 2>/dev/null || true; \
 	done
 	@echo ""; n=$$(wc -l < $(DATA)/proofs/failures.txt); \
