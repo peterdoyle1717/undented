@@ -450,8 +450,8 @@ static void uhs_to_klein(double x,double y,double t,double*kx,double*ky,double*k
 static double signed_sph_angle(double ax,double ay,double az,
                                 double bx,double by,double bz,
                                 double cx,double cy,double cz){
-    double bcx=by*cz-bz*cy,bcy=bz*cx-bx*cz,bcz=bx*cy-by*cx;
-    double num=ax*bcx+ay*bcy+az*bcz;
+    double acx=ay*cz-az*cy,acy=az*cx-ax*cz,acz=ax*cy-ay*cx;
+    double num=bx*acx+by*acy+bz*acz;
     double den=(ax*bx+ay*by+az*bz)*(bx*cx+by*cy+bz*cz)-(ax*cx+ay*cy+az*cz);
     return atan2(num,den);
 }
@@ -459,7 +459,7 @@ static double signed_sph_angle(double ax,double ay,double az,
 /* coords[v][0..2] = 3D position of vertex v (1..NV).
    Returns 1 if undented, 0 if any vertex has negative turning. */
 static int undented_check(double coords[][3]){
-    int ring[MAXRING]; double total=0,min_t=1e30;
+    int ring[MAXRING]; double min_t=1e30;
     for(int v=1;v<=NV;v++){
         int k=cyclic_nbrs(v,ring); if(k<3) continue;
         double dx[MAXRING],dy[MAXRING],dz[MAXRING];
@@ -474,11 +474,8 @@ static int undented_check(double coords[][3]){
             tv+=signed_sph_angle(dx[(i-1+k)%k],dy[(i-1+k)%k],dz[(i-1+k)%k],
                                   dx[i],dy[i],dz[i],
                                   dx[(i+1)%k],dy[(i+1)%k],dz[(i+1)%k]);
-        total+=tv;
         if(tv<min_t) min_t=tv;
     }
-    /* flip sign convention if needed */
-    if(total<0){min_t=-min_t;}
     return (min_t>=0.0)?1:0;
 }
 

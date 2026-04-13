@@ -253,9 +253,9 @@ def compute_undented(verts, faces):
         return ring
 
     def signed_sph_angle(a, b, c):
-        """Signed angle at b in the spherical triangle (a, b, c)."""
-        bc = np.cross(b, c)
-        num = a @ bc
+        """Signed spherical exterior angle at b between a and c."""
+        ac = np.cross(a, c)
+        num = b @ ac
         den = (a @ b) * (b @ c) - (a @ c)
         return np.arctan2(num, den)
 
@@ -280,10 +280,6 @@ def compute_undented(verts, faces):
             tv += signed_sph_angle(dirs[(i-1) % k], dirs[i], dirs[(i+1) % k])
         total_turning += tv
         turnings.append(tv)
-
-    # Flip all signs if overall orientation is negative
-    if total_turning < 0:
-        turnings = [-t for t in turnings]
 
     min_turning = min(turnings) if turnings else 0.0
 
