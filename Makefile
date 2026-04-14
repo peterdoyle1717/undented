@@ -13,7 +13,6 @@
 VMAX  ?= 30
 JOBS  ?= 80
 NICE  ?= 19
-ZC    = gzip -dc
 
 # Shard counts (load balance for large v)
 SHARDS_SEED ?= 800
@@ -58,12 +57,12 @@ $(SOLVER): src/neoeuc_c.c | $(BIN)
 seeds: $(BUCKYGEN) $(CLERS)
 	@mkdir -p $(DATA)/seed $(RUN)/tmp $(RUN)/logs
 	@for v in $$(seq 4 $(VMAX)); do \
-	  out=$(DATA)/seed/$$v.txt.gz; \
+	  out=$(DATA)/seed/$$v.txt; \
 	  [ -f "$$out" ] && continue; \
 	  if [ $$v -eq 6 ]; then \
-	    echo CCCACAAE | gzip > "$$out"; echo "seed v=6: 1"; \
+	    echo CCCACAAE > "$$out"; echo "seed v=6: 1"; \
 	  elif [ $$v -lt 8 ] || [ $$v -eq 5 ]; then \
-	    printf '' | gzip > "$$out"; \
+	    : > "$$out"; \
 	  else \
 	    nice -n $(NICE) parallel -j $(JOBS) \
 	      "$(BUCKYGEN) $$v {}/$(SHARDS_SEED) 2>/dev/null \
@@ -71,12 +70,12 @@ seeds: $(BUCKYGEN) $(CLERS)
 	       | sort > $(RUN)/tmp/seed_$${v}_{}.sorted" \
 	      ::: $$(seq 0 $$(($(SHARDS_SEED) - 1))) 2>/dev/null; \
 	    if ls $(RUN)/tmp/seed_$${v}_*.sorted 1>/dev/null 2>&1; then \
-	      sort -m $(RUN)/tmp/seed_$${v}_*.sorted | gzip > "$$out"; \
+	      sort -m $(RUN)/tmp/seed_$${v}_*.sorted > "$$out"; \
 	      rm -f $(RUN)/tmp/seed_$${v}_*.sorted; \
 	    else \
-	      printf '' | gzip > "$$out"; \
+	      : > "$$out"; \
 	    fi; \
-	    echo "seed v=$$v: $$($(ZC) "$$out" | wc -l)"; \
+	    echo "seed v=$$v: $$(wc -l < "$$out" | tr -d ' ')"; \
 	  fi; \
 	done
 
@@ -84,17 +83,17 @@ seeds: $(BUCKYGEN) $(CLERS)
 
 primes: seeds $(GROW_STEP) $(CLERS)
 	@mkdir -p $(DATA)/prime $(RUN)/tmp $(RUN)/logs
-	@if [ ! -f $(DATA)/prime/4.txt.gz ]; then \
-	  echo CCAE | gzip > $(DATA)/prime/4.txt.gz; echo "prime v=4: 1"; fi
-	@if [ ! -f $(DATA)/prime/5.txt.gz ]; then \
-	  printf '' | gzip > $(DATA)/prime/5.txt.gz; fi
+	@if [ ! -f $(DATA)/prime/4.txt ]; then \
+	  echo CCAE > $(DATA)/prime/4.txt; echo "prime v=4: 1"; fi
+	@if [ ! -f $(DATA)/prime/5.txt ]; then \
+	  : > $(DATA)/prime/5.txt; fi
 	@for v in $$(seq 5 $$(($(VMAX) - 1))); do \
 	  vn=$$((v + 1)); \
-	  out=$(DATA)/prime/$$vn.txt.gz; \
+	  out=$(DATA)/prime/$$vn.txt; \
 	  [ -f "$$out" ] && [ -s "$$out" ] && continue; \
-	  src=$(DATA)/prime/$$v.txt.gz; \
+	  src=$(DATA)/prime/$$v.txt; \
 	  [ -f "$$src" ] || { echo "prime v=$$v missing"; break; }; \
-	  n=$$($(ZC) "$$src" 2>/dev/null | wc -l | tr -d ' '); \
+	  n=$$(wc -l < "$$src" | tr -d ' '); \
 	  if [ "$$n" -gt 0 ]; then \
 	    sh=$$((n / 500 + 1)); \
 	    [ $$sh -lt $(JOBS) ] && sh=$(JOBS); \
@@ -102,7 +101,7 @@ primes: seeds $(GROW_STEP) $(CLERS)
 	    [ $$sh -gt $$n ] && sh=$$n; \
 	    [ $$sh -lt 2 ] && sh=2; \
 	    echo "grow v=$$v → $$vn ($$n nets, $$sh shards)"; \
-	    $(ZC) "$$src" | split -l $$(( (n + sh - 1) / sh )) - "$(RUN)/tmp/g_$${v}_"; \
+	    split -l $$(( (n + sh - 1) / sh )) "$$src" "$(RUN)/tmp/g_$${v}_"; \
 	    if command -v parallel >/dev/null 2>&1; then \
 	      nice -n $(NICE) parallel -j $(JOBS) \
 	        "$(GROW_STEP) < {} | sort > {}.out" \
@@ -113,16 +112,15 @@ primes: seeds $(GROW_STEP) $(CLERS)
 	      done; \
 	    fi; \
 	    { sort -m $(RUN)/tmp/g_$${v}_*.out | uniq; \
-	      $(ZC) $(DATA)/seed/$$vn.txt.gz 2>/dev/null || true; \
-	    } | sort -u | gzip > "$${out}.tmp"; \
+	      cat $(DATA)/seed/$$vn.txt 2>/dev/null || true; \
+	    } | sort -u > "$${out}.tmp"; \
 	    rm -f $(RUN)/tmp/g_$${v}_* $(RUN)/tmp/g_$${v}_*.out; \
 	  else \
 	    echo "grow v=$$v → $$vn (seeds only)"; \
-	    { $(ZC) $(DATA)/seed/$$vn.txt.gz 2>/dev/null || true; \
-	    } | sort -u | gzip > "$${out}.tmp"; \
+	    sort -u $(DATA)/seed/$$vn.txt > "$${out}.tmp" 2>/dev/null || : > "$${out}.tmp"; \
 	  fi; \
 	  mv "$${out}.tmp" "$$out"; \
-	  echo "  prime v=$$vn: $$($(ZC) "$$out" | wc -l)"; \
+	  echo "  prime v=$$vn: $$(wc -l < "$$out" | tr -d ' ')"; \
 	done
 
 # ── solve ────────────────────────────────────────────────────────────────
@@ -132,14 +130,14 @@ solve: primes $(SOLVER)
 	@for v in $$(seq 4 $(VMAX)); do \
 	  [ $$v -eq 5 ] && continue; \
 	  objdir=$(DATA)/obj/$$v; mkdir -p "$$objdir"; \
-	  src=$(DATA)/prime/$$v.txt.gz; \
-	  [ -f "$$src" ] || src=$(DATA)/prime/$$v.txt; \
+	  src=$(DATA)/prime/$$v.txt; \
 	  [ -f "$$src" ] || continue; \
-	  n=$$($(ZC) "$$src" 2>/dev/null | wc -l || wc -l < "$$src"); \
+	  n=$$(wc -l < "$$src" | tr -d ' '); \
+	  [ "$$n" -eq 0 ] && continue; \
 	  have=$$(find "$$objdir" -name '*.obj' -o -name '*.failed' 2>/dev/null | wc -l); \
 	  [ "$$have" -ge "$$n" ] && continue; \
 	  echo "solve v=$$v ($$n nets)"; \
-	  $(ZC) "$$src" 2>/dev/null | nice -n $(NICE) $(SOLVER) "$$objdir" \
+	  nice -n $(NICE) $(SOLVER) "$$objdir" < "$$src" \
 	    2> $(RUN)/logs/solve_$$v.log; \
 	done
 
