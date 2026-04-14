@@ -27,14 +27,21 @@ GROW_STEP    = $(BIN)/grow_step
 SOLVER       = $(BIN)/neoeuc_c
 PLANTRI2POLY = src/plantri_to_poly
 PROVER       = src/prove_float.py
+DENT_CHECK   = $(BIN)/dent_check
+LENGTH_CHECK = $(BIN)/length_check
+DEFECT_CHECK = $(BIN)/defect_check
+EMBED_CHECK  = $(BIN)/embed_check
+CHECK_ALL    = $(BIN)/check_all
 
-.PHONY: all tools seed-one seeds primes solve prove status clean
+.PHONY: all tools checkers seed-one seeds primes solve prove check status clean
 
 all: primes solve prove
 
 # ── tools ────────────────────────────────────────────────────────────────
 
 tools: $(BUCKYGEN) $(CLERS) $(GROW_STEP) $(SOLVER)
+
+checkers: $(DENT_CHECK) $(LENGTH_CHECK) $(DEFECT_CHECK) $(CHECK_ALL)
 
 $(BIN):
 	mkdir -p $(BIN)
@@ -49,6 +56,21 @@ $(GROW_STEP): src/grow_step.c | $(BIN)
 	cc -O3 -o $@ $<
 
 $(SOLVER): src/neoeuc_c.c | $(BIN)
+	cc -O3 -o $@ $< -lm
+
+$(DENT_CHECK): src/dent_check.c | $(BIN)
+	cc -O3 -o $@ $< -lm
+
+$(LENGTH_CHECK): src/length_check.c | $(BIN)
+	cc -O3 -o $@ $< -lm
+
+$(DEFECT_CHECK): src/defect_check.c | $(BIN)
+	cc -O3 -o $@ $< -lm
+
+$(EMBED_CHECK): src/embed_check.cpp | $(BIN)
+	c++ -O2 -std=c++17 -o $@ $< -lCGAL -lgmp -lmpfr 2>/dev/null || echo "embed_check: CGAL not available (optional)"
+
+$(CHECK_ALL): src/check_all.c | $(BIN)
 	cc -O3 -o $@ $< -lm
 
 # ── seeds ────────────────────────────────────────────────────────────────
@@ -178,6 +200,18 @@ prove: solve
 	done
 	@echo ""; n=$$(wc -l < $(DATA)/proofs/failures.txt); \
 	echo "=== $$n failures — see data/proofs/failures.txt ==="
+
+# ── check ────────────────────────────────────────────────────────────────
+
+check: checkers
+	@for v in $$(seq 4 $(VMAX)); do \
+	  [ $$v -eq 5 ] && continue; \
+	  objdir=$(DATA)/obj/$$v; \
+	  n=$$(find "$$objdir" -name '*.obj' 2>/dev/null | wc -l); \
+	  [ "$$n" -eq 0 ] && continue; \
+	  echo "check v=$$v ($$n nets)"; \
+	  find "$$objdir" -name '*.obj' | xargs $(CHECK_ALL) | grep -v "^[0-9.]*  *[0-9]" || true; \
+	done
 
 # ── status ───────────────────────────────────────────────────────────────
 

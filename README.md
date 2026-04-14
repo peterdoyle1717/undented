@@ -24,6 +24,8 @@ GNU parallel is optional (used for faster sharded enumeration if present).
     make primes    VMAX=N   grow primes by recurrence: prime(v) = grow(prime(v-1)) ∪ seed(v)
     make solve     VMAX=N   Euclidean embeddings via homotopy from ideal
     make prove     VMAX=N   existence proofs (IEEE 754 + error bounds)
+    make check     VMAX=N   independent validation (dent, length, defect, embed)
+    make checkers           build the standalone check tools
     make all       VMAX=N   everything
     make status             show results
 
@@ -56,6 +58,11 @@ See PROOF_METHOD.txt for details.
       neoeuc_c.c              homotopy solver (ideal → Euclidean, with polish)
       prove_float.py          existence prover (float + IEEE 754 error bounds)
       plantri_to_poly         planar_code → face-list converter
+      dent_check.c            min link turning (undentedness)
+      length_check.c          max edge length deviation
+      defect_check.c          min angle defect
+      embed_check.cpp         self-intersection test (requires CGAL, optional)
+      check_all.c             runs dent + length + defect in one pass
     third_party/buckygen/   Brinkmann's fullerene generator (GPL)
     data/                   generated data (gitignored)
     run/                    scratch and logs (gitignored)
