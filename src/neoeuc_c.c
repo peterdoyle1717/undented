@@ -162,7 +162,7 @@ static int lu_solve(double J[][MAXV],double b[],int n){
     return 0;
 }
 
-static void horou(float u_out[]){
+static void horou(double u_out[]){
     static int bndry[MAXV+1],int_idx[MAXV+1],interior[MAXV];
     static int ring[MAXV+1][MAXRING],ringlen[MAXV+1];
     static double xvec[MAXV];
@@ -222,7 +222,7 @@ static void horou(float u_out[]){
     }
 done:
     u_out[0]=NAN;
-    for(int v=2;v<=NV;v++) u_out[v-1]=bndry[v]?1.0f:(float)xvec[int_idx[v]];
+    for(int v=2;v<=NV;v++) u_out[v-1]=bndry[v]?1.0:xvec[int_idx[v]];
     #undef U
 }
 
@@ -234,7 +234,7 @@ static void thirdpoint(double xa,double ya,double xb,double yb,
     double yn2=d0*d0-xn*xn,yn=sqrt(yn2>0?yn2:0);
     *xc=xa+dx*xn+dy*yn; *yc=ya+dy*xn-dx*yn;
 }
-static void horoz(float u[],float out[]){
+static void horoz(double u[],double out[]){
     static double hx[MAXV+1],hy[MAXV+1]; static int placed[MAXV+1];
     static int qa[MAXV*2+8],qb[MAXV*2+8];
     memset(placed,0,(NV+2)*sizeof(int));
@@ -256,7 +256,7 @@ static void horoz(float u[],float out[]){
         }
     }}
     out[0]=out[1]=out[2]=NAN;
-    for(int v=2;v<=NV;v++){out[3*(v-1)]=u[v-1];out[3*(v-1)+1]=(float)hx[v];out[3*(v-1)+2]=(float)hy[v];}
+    for(int v=2;v<=NV;v++){out[3*(v-1)]=u[v-1];out[3*(v-1)+1]=hx[v];out[3*(v-1)+2]=hy[v];}
 }
 
 /* ── reference triangle & edge list ─────────────────────────────────────── */
@@ -519,7 +519,7 @@ static void write_frame_euc(float *out_buf, double coords[][3]){
 
 int main(int argc, char **argv){
     static char line[MAXCODE];
-    static float u[MAXV], hz[MAXV*3];
+    static double u[MAXV], hz[MAXV*3];
     static double out_buf[MAXV*3];
     static double coords[MAXV+1][3];
     static char outdir[4096];
@@ -527,7 +527,7 @@ int main(int argc, char **argv){
     outdir[0]='\0';
     if(argc>=2) strncpy(outdir,argv[1],sizeof(outdir)-1);
 
-    int n = 1;    /* rho schedule steps (bisection does the rest) */
+    int n = 12;   /* rho schedule steps (bisection does the rest) */
     long nets=0, net_failed=0;
 
     while(fgets(line,sizeof(line),stdin)){
