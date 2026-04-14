@@ -175,9 +175,9 @@ static int process(FILE *fp, const char *name) {
     }
 
     if (name)
-        printf("%.6f %s\n", best, name);
+        printf("%.6e %s\n", best, name);
     else
-        printf("%.6f\n", best);
+        printf("%.6e\n", best);
 
     free(anglesum);
     free(verts.data);

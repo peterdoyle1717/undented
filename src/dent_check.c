@@ -145,9 +145,9 @@ static int process(FILE *fp, const char *name) {
     }
     if (signed_volume() < 0) build(1); else build(0);
     if (name)
-        printf("%.6f %s\n", dent_index(), name);
+        printf("%.6e %s\n", dent_index(), name);
     else
-        printf("%.6f\n", dent_index());
+        printf("%.6e\n", dent_index());
     return 0;
 }
 

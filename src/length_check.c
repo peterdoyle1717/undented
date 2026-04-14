@@ -74,9 +74,9 @@ static int process(FILE *fp, const char *name) {
     }
     double dev = max_deviation();
     if (name)
-        printf("%.8f %s\n", dev, name);
+        printf("%.6e %s\n", dev, name);
     else
-        printf("%.8f\n", dev);
+        printf("%.6e\n", dev);
     return 0;
 }
 

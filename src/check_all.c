@@ -264,9 +264,9 @@ static int process(FILE *fp, const char *name) {
     double sep    = calc_sep();
 
     if (name)
-        printf("%.6f %d %.6f %.8f %.6f %s\n", dent, embed, defect, length, sep, name);
+        printf("%.6e %d %.6e %.6e %.6e %s\n", dent, embed, defect, length, sep, name);
     else
-        printf("%.6f %d %.6f %.8f %.6f\n", dent, embed, defect, length, sep);
+        printf("%.6e %d %.6e %.6e %.6e\n", dent, embed, defect, length, sep);
     return 0;
 }
 
