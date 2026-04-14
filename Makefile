@@ -26,6 +26,7 @@ CLERS        = $(BIN)/clers
 GROW_STEP    = $(BIN)/grow_step
 IDEAL        = $(BIN)/ideal
 HYPER        = $(BIN)/hyper
+EUCLID       = $(BIN)/euclid
 SOLVER       = $(BIN)/neoeuc_c
 PLANTRI2POLY = src/plantri_to_poly
 PROVER       = src/prove_float.py
@@ -37,11 +38,28 @@ CHECK_ALL    = $(BIN)/check_all
 
 .PHONY: all tools checkers seed-one seeds primes ideal hyper solve prove check status clean
 
+# solve target also available via the old monolithic solver:
+solve-old: primes $(SOLVER)
+	@mkdir -p $(RUN)/logs
+	@for v in $$(seq 4 $(VMAX)); do \
+	  [ $$v -eq 5 ] && continue; \
+	  objdir=$(DATA)/obj/$$v; mkdir -p "$$objdir"; \
+	  src=$(DATA)/prime/$$v.txt; \
+	  [ -f "$$src" ] || continue; \
+	  n=$$(wc -l < "$$src" | tr -d ' '); \
+	  [ "$$n" -eq 0 ] && continue; \
+	  have=$$(find "$$objdir" -name '*.obj' -o -name '*.failed' 2>/dev/null | wc -l); \
+	  [ "$$have" -ge "$$n" ] && continue; \
+	  echo "solve-old v=$$v ($$n nets)"; \
+	  nice -n $(NICE) $(SOLVER) "$$objdir" < "$$src" \
+	    2> $(RUN)/logs/solve_$$v.log; \
+	done
+
 all: primes ideal hyper solve prove
 
 # ── tools ────────────────────────────────────────────────────────────────
 
-tools: $(BUCKYGEN) $(CLERS) $(GROW_STEP) $(IDEAL) $(HYPER) $(SOLVER)
+tools: $(BUCKYGEN) $(CLERS) $(GROW_STEP) $(IDEAL) $(HYPER) $(EUCLID) $(SOLVER)
 
 checkers: $(DENT_CHECK) $(LENGTH_CHECK) $(DEFECT_CHECK) $(CHECK_ALL)
 
@@ -61,6 +79,9 @@ $(IDEAL): src/ideal.c | $(BIN)
 	cc -O3 -o $@ $< -lm
 
 $(HYPER): src/hyper.c | $(BIN)
+	cc -O3 -o $@ $< -lm
+
+$(EUCLID): src/euclid.c | $(BIN)
 	cc -O3 -o $@ $< -lm
 
 $(SOLVER): src/neoeuc_c.c | $(BIN)
@@ -203,10 +224,11 @@ hyper: primes $(HYPER)
 
 # ── solve ────────────────────────────────────────────────────────────────
 
-solve: hyper $(SOLVER)
+solve: hyper $(EUCLID)
 	@mkdir -p $(RUN)/logs
 	@for v in $$(seq 4 $(VMAX)); do \
 	  [ $$v -eq 5 ] && continue; \
+	  kleindir=$(DATA)/klein/$$v; \
 	  objdir=$(DATA)/obj/$$v; mkdir -p "$$objdir"; \
 	  src=$(DATA)/prime/$$v.txt; \
 	  [ -f "$$src" ] || continue; \
@@ -215,7 +237,7 @@ solve: hyper $(SOLVER)
 	  have=$$(find "$$objdir" -name '*.obj' -o -name '*.failed' 2>/dev/null | wc -l); \
 	  [ "$$have" -ge "$$n" ] && continue; \
 	  echo "solve v=$$v ($$n nets)"; \
-	  nice -n $(NICE) $(SOLVER) "$$objdir" < "$$src" \
+	  nice -n $(NICE) $(EUCLID) "$$kleindir" "$$objdir" $(TARGET_RHO) < "$$src" \
 	    2> $(RUN)/logs/solve_$$v.log; \
 	done
 
