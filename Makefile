@@ -24,6 +24,8 @@ BIN   = bin
 BUCKYGEN     = $(BIN)/buckygen
 CLERS        = $(BIN)/clers
 GROW_STEP    = $(BIN)/grow_step
+IDEAL        = $(BIN)/ideal
+HYPER        = $(BIN)/hyper
 SOLVER       = $(BIN)/neoeuc_c
 PLANTRI2POLY = src/plantri_to_poly
 PROVER       = src/prove_float.py
@@ -33,13 +35,13 @@ DEFECT_CHECK = $(BIN)/defect_check
 EMBED_CHECK  = $(BIN)/embed_check
 CHECK_ALL    = $(BIN)/check_all
 
-.PHONY: all tools checkers seed-one seeds primes solve prove check status clean
+.PHONY: all tools checkers seed-one seeds primes ideal hyper solve prove check status clean
 
-all: primes solve prove
+all: primes ideal hyper solve prove
 
 # ── tools ────────────────────────────────────────────────────────────────
 
-tools: $(BUCKYGEN) $(CLERS) $(GROW_STEP) $(SOLVER)
+tools: $(BUCKYGEN) $(CLERS) $(GROW_STEP) $(IDEAL) $(HYPER) $(SOLVER)
 
 checkers: $(DENT_CHECK) $(LENGTH_CHECK) $(DEFECT_CHECK) $(CHECK_ALL)
 
@@ -54,6 +56,12 @@ $(CLERS): src/clers.c | $(BIN)
 
 $(GROW_STEP): src/grow_step.c | $(BIN)
 	cc -O3 -o $@ $<
+
+$(IDEAL): src/ideal.c | $(BIN)
+	cc -O3 -o $@ $< -lm
+
+$(HYPER): src/hyper.c | $(BIN)
+	cc -O3 -o $@ $< -lm
 
 $(SOLVER): src/neoeuc_c.c | $(BIN)
 	cc -O3 -o $@ $< -lm
@@ -158,9 +166,44 @@ primes: seeds $(GROW_STEP) $(CLERS)
 	  echo "  prime v=$$vn: $$(wc -l < "$$out" | tr -d ' ')"; \
 	done
 
+# ── ideal ────────────────────────────────────────────────────────────────
+
+ideal: primes $(IDEAL)
+	@for v in $$(seq 4 $(VMAX)); do \
+	  [ $$v -eq 5 ] && continue; \
+	  objdir=$(DATA)/ideal/$$v; mkdir -p "$$objdir"; \
+	  src=$(DATA)/prime/$$v.txt; \
+	  [ -f "$$src" ] || continue; \
+	  n=$$(wc -l < "$$src" | tr -d ' '); \
+	  [ "$$n" -eq 0 ] && continue; \
+	  have=$$(find "$$objdir" -name '*.obj' 2>/dev/null | wc -l); \
+	  [ "$$have" -ge "$$n" ] && continue; \
+	  echo "ideal v=$$v ($$n nets)"; \
+	  $(IDEAL) "$$objdir" < "$$src" 2>&1; \
+	done
+
+# ── hyper ────────────────────────────────────────────────────────────────
+
+TARGET_RHO ?= 0.01
+
+hyper: primes $(HYPER)
+	@for v in $$(seq 4 $(VMAX)); do \
+	  [ $$v -eq 5 ] && continue; \
+	  objdir=$(DATA)/klein/$$v; mkdir -p "$$objdir"; \
+	  src=$(DATA)/prime/$$v.txt; \
+	  [ -f "$$src" ] || continue; \
+	  n=$$(wc -l < "$$src" | tr -d ' '); \
+	  [ "$$n" -eq 0 ] && continue; \
+	  have=$$(find "$$objdir" -name '*.obj' -o -name '*.failed' 2>/dev/null | wc -l); \
+	  [ "$$have" -ge "$$n" ] && continue; \
+	  echo "hyper v=$$v ($$n nets)"; \
+	  nice -n $(NICE) $(HYPER) "$$objdir" $(TARGET_RHO) < "$$src" \
+	    2> $(RUN)/logs/hyper_$$v.log; \
+	done
+
 # ── solve ────────────────────────────────────────────────────────────────
 
-solve: primes $(SOLVER)
+solve: hyper $(SOLVER)
 	@mkdir -p $(RUN)/logs
 	@for v in $$(seq 4 $(VMAX)); do \
 	  [ $$v -eq 5 ] && continue; \
