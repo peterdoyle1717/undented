@@ -12,10 +12,10 @@ degree-3 vertex.
 
 For large v, clone to a compute server:
 
-    ssh doob 'cd undented && git pull && nohup make all VMAX=50 JOBS=96 > run/logs/all.log 2>&1 &'
-    ssh doob 'cd undented && make status'
+    ssh server 'cd undented && git pull && nohup make all VMAX=50 JOBS=96 > run/logs/all.log 2>&1 &'
+    ssh server 'cd undented && make status'
 
-Requires: C compiler, GNU parallel, python3, numpy, scipy, LAPACK.
+Requires: C compiler, GNU parallel, python3, numpy, scipy.
 
 ## Pipeline
 
@@ -25,15 +25,25 @@ Requires: C compiler, GNU parallel, python3, numpy, scipy, LAPACK.
     make prove   VMAX=N     existence proofs (IEEE 754 + error bounds)
     make status             show results
 
+## What the prover checks
+
+0. **Undented** — every vertex turning sum > 0
+0. **Embedded** — no triangle-triangle intersections
+1. **3|V| ≥ |E|**
+2. **Collision distance > 0** — non-adjacent simplices separated
+3. **σ_min > 0 and ρ < σ_min²/(16√E)** — rigidity + near solution
+4. **Perturbation bound < CD/√V** — solution stays embedded
+
+See PROOF_METHOD.txt for details.
+
 ## Layout
 
-    src/                    our code
+    src/                    source code
+      clers.c                 CLERS tool: decode, encode, name, canonical
+      clers.py                CLERS decoder (Python, for scripting)
       grow_step.c             vertex insertion → offspring names
-      clers_name.c            canonical CLERS naming
-      neoeuc_c.c              homotopy solver (ideal → Euclidean)
-      newton_polish.c         Newton-refine to machine precision
-      prove_float.py          existence prover (float + error bounds)
-      bin2obj.py              solver binary → OBJ converter
+      neoeuc_c.c              homotopy solver (ideal → Euclidean, with polish)
+      prove_float.py          existence prover (float + IEEE 754 error bounds)
       plantri_to_poly         planar_code → face-list converter
     third_party/buckygen/   Brinkmann's fullerene generator (GPL)
     data/                   generated data (gitignored)

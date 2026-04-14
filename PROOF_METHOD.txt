@@ -2,12 +2,31 @@ Rigorous existence proofs via IEEE 754 floating point
 =====================================================
 
 This document explains the proof method used in prove_float.py to
-rigorously prove existence of unit-edge-length polyhedra, and argues
-that it is at least as reliable as the interval-arithmetic approach
-in Ellison's shape-existence package.
+rigorously prove existence of undented unit-edge-length polyhedra.
 
-Both approaches apply the same theorem (Ellison, arXiv:2312.05376).
-They differ only in how the four inequalities are verified.
+The proof has two parts: geometric verification (undented, embedded)
+and an existence theorem (Ellison, arXiv:2312.05376) establishing
+that an exact unit-edge-length realization exists near the computed
+approximate one.
+
+
+What the prover checks
+----------------------
+
+  (0)  Undented — every vertex has strictly positive link turning sum
+  (0b) Embedded — no pair of triangles intersects
+  (1)  3|V| ≥ |E|
+  (2)  CD > 0 — non-adjacent simplices are separated
+  (3)  ρ < σ_min² / (16 √|E|) — close enough to a solution
+  (4)  Perturbation bound < CD/√|V| — the exact solution stays embedded
+
+Checks (0) and (0b) verify the approximate realization. Checks (1)–(4)
+apply Ellison's theorem to prove a nearby exact realization exists.
+
+Note: Ellison's collision distance (check 2) tests non-adjacent
+simplices only. This does not by itself prove embeddedness — adjacent
+triangles can fold through each other without affecting CD. Check (0b)
+fills this gap by testing all triangle pairs for intersection.
 
 
 The theorem
@@ -23,7 +42,7 @@ realization p: V → R³ (not necessarily with unit edges), define:
 If all four conditions hold:
 
   (1) 3|V| ≥ |E|
-  (2) CD > 0                         (non-self-intersecting)
+  (2) CD > 0
   (3) ρ < σ_min² / (16 √|E|)        (close enough to a solution)
   (4) [perturbation bound] < CD/√|V| (solution stays non-self-intersecting)
 
