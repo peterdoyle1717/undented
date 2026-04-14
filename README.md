@@ -12,18 +12,29 @@ degree-3 vertex.
 
 For large v, clone to a compute server:
 
-    ssh server 'cd undented && git pull && nohup make all VMAX=50 JOBS=96 > run/logs/all.log 2>&1 &'
-    ssh server 'cd undented && make status'
+    make all VMAX=50 JOBS=96
 
-Requires: C compiler, GNU parallel, python3, numpy, scipy.
+Requires: C compiler, python3, numpy, scipy.
+GNU parallel is optional (used for faster sharded enumeration if present).
 
 ## Pipeline
 
-    make seeds   VMAX=N     fullerene-dual seeds via buckygen
-    make primes  VMAX=N     grow by recurrence: prime(v) = grow(prime(v-1)) ∪ seed(v)
-    make solve   VMAX=N     Euclidean embeddings via homotopy from ideal
-    make prove   VMAX=N     existence proofs (IEEE 754 + error bounds)
+    make seed-one  V=N      generate one seed file
+    make seeds     VMAX=N   generate seed files through N
+    make primes    VMAX=N   grow primes by recurrence: prime(v) = grow(prime(v-1)) ∪ seed(v)
+    make solve     VMAX=N   Euclidean embeddings via homotopy from ideal
+    make prove     VMAX=N   existence proofs (IEEE 754 + error bounds)
+    make all       VMAX=N   everything
     make status             show results
+
+## Seed and prime semantics
+
+- `seed(6)` = the octahedron (base case)
+- `seed(v)` = empty for `v < 6` and `7 ≤ v < 12`
+- `seed(v)` = fullerene duals via buckygen for `v ≥ 12`
+- `prime(4)` = the tetrahedron (exceptional, does not seed the recurrence)
+- `prime(5)` = empty
+- `prime(v) = grow(prime(v-1)) ∪ seed(v)` for `v ≥ 6`
 
 ## What the prover checks
 

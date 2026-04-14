@@ -1,20 +1,19 @@
 # undented — prime neoplatonic solids: enumerate, solve, prove
 #
-#   make seeds  VMAX=30      generate fullerene-dual seeds
-#   make primes VMAX=30      grow primes by recurrence
-#   make solve  VMAX=30      Euclidean embeddings
-#   make prove  VMAX=30      existence proofs
-#   make all    VMAX=30      everything
-#   make status              what's done
-#
-# Clone to a compute server and adjust JOBS:
-#   ssh doob 'cd undented && git pull && nohup make all VMAX=50 JOBS=96 > run/logs/all.log 2>&1 &'
+#   make seed-one  V=12      generate one seed file
+#   make seeds     VMAX=30   generate seed files through VMAX
+#   make primes    VMAX=30   grow primes by recurrence
+#   make solve     VMAX=30   Euclidean embeddings
+#   make prove     VMAX=30   existence proofs
+#   make all       VMAX=30   everything
+#   make status               what's done
 
 VMAX  ?= 30
+V     ?= 12
 JOBS  ?= 80
 NICE  ?= 19
 
-# Shard counts (load balance for large v)
+# Load-balance knobs for sharded enumeration
 SHARDS_SEED ?= 800
 SHARDS_GROW ?= 2000
 
@@ -29,7 +28,7 @@ SOLVER       = $(BIN)/neoeuc_c
 PLANTRI2POLY = src/plantri_to_poly
 PROVER       = src/prove_float.py
 
-.PHONY: all tools seeds primes solve prove status clean
+.PHONY: all tools seed-one seeds primes solve prove status clean
 
 all: primes solve prove
 
@@ -54,35 +53,49 @@ $(SOLVER): src/neoeuc_c.c | $(BIN)
 
 # ── seeds ────────────────────────────────────────────────────────────────
 
-seeds: $(BUCKYGEN) $(CLERS)
-	@mkdir -p $(DATA)/seed $(RUN)/tmp $(RUN)/logs
-	@for v in $$(seq 4 $(VMAX)); do \
-	  out=$(DATA)/seed/$$v.txt; \
-	  [ -f "$$out" ] && continue; \
-	  if [ $$v -eq 6 ]; then \
-	    echo CCCACAAE > "$$out"; echo "seed v=6: 1"; \
-	  elif [ $$v -lt 8 ] || [ $$v -eq 5 ]; then \
-	    : > "$$out"; \
-	  else \
+seed-one: $(BUCKYGEN) $(CLERS)
+	@mkdir -p $(DATA)/seed $(RUN)/tmp
+	@v=$(V); \
+	out=$(DATA)/seed/$$v.txt; \
+	[ -f "$$out" ] && exit 0; \
+	if [ $$v -lt 6 ] || [ $$v -eq 5 ]; then \
+	  : > "$$out"; \
+	elif [ $$v -eq 6 ]; then \
+	  echo CCCACAAE > "$$out"; echo "seed v=6: 1"; \
+	elif [ $$v -lt 12 ]; then \
+	  : > "$$out"; \
+	else \
+	  if command -v parallel >/dev/null 2>&1; then \
 	    nice -n $(NICE) parallel -j $(JOBS) \
 	      "$(BUCKYGEN) $$v {}/$(SHARDS_SEED) 2>/dev/null \
 	       | python3 $(PLANTRI2POLY) | $(CLERS) name \
 	       | sort > $(RUN)/tmp/seed_$${v}_{}.sorted" \
 	      ::: $$(seq 0 $$(($(SHARDS_SEED) - 1))) 2>/dev/null; \
-	    if ls $(RUN)/tmp/seed_$${v}_*.sorted 1>/dev/null 2>&1; then \
-	      sort -m $(RUN)/tmp/seed_$${v}_*.sorted > "$$out"; \
-	      rm -f $(RUN)/tmp/seed_$${v}_*.sorted; \
-	    else \
-	      : > "$$out"; \
-	    fi; \
-	    echo "seed v=$$v: $$(wc -l < "$$out" | tr -d ' ')"; \
+	  else \
+	    for shard in $$(seq 0 $$(($(SHARDS_SEED) - 1))); do \
+	      $(BUCKYGEN) $$v $$shard/$(SHARDS_SEED) 2>/dev/null \
+	        | python3 $(PLANTRI2POLY) | $(CLERS) name \
+	        | sort > $(RUN)/tmp/seed_$${v}_$${shard}.sorted; \
+	    done; \
 	  fi; \
+	  if ls $(RUN)/tmp/seed_$${v}_*.sorted 1>/dev/null 2>&1; then \
+	    sort -m $(RUN)/tmp/seed_$${v}_*.sorted > "$$out"; \
+	    rm -f $(RUN)/tmp/seed_$${v}_*.sorted; \
+	  else \
+	    : > "$$out"; \
+	  fi; \
+	  echo "seed v=$$v: $$(wc -l < "$$out" | tr -d ' ')"; \
+	fi
+
+seeds: $(BUCKYGEN) $(CLERS)
+	@for v in $$(seq 4 $(VMAX)); do \
+	  $(MAKE) --no-print-directory seed-one V=$$v; \
 	done
 
 # ── primes ───────────────────────────────────────────────────────────────
 
 primes: seeds $(GROW_STEP) $(CLERS)
-	@mkdir -p $(DATA)/prime $(RUN)/tmp $(RUN)/logs
+	@mkdir -p $(DATA)/prime $(RUN)/tmp
 	@if [ ! -f $(DATA)/prime/4.txt ]; then \
 	  echo CCAE > $(DATA)/prime/4.txt; echo "prime v=4: 1"; fi
 	@if [ ! -f $(DATA)/prime/5.txt ]; then \
