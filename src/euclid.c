@@ -233,29 +233,19 @@ int main(int argc, char **argv){
             fail_count++; nets++; continue;
         }
 
-        /* initial guess: Klein → UHS → Euclidean blow-up.
-           v1,v2,v3 are gauge-pinned. v4+ converted via Klein→UHS→log blow-up.
-           The blow-up uses the rho from v1's Klein z-coordinate. */
+        /* initial guess: UHS → Euclidean blow-up.
+           v1 in UHS is (0,0,a), recover rho = log(a) = log(kz[1]).
+           Blow-up: x/(2rho), y/(2rho), log(t)/(2rho). */
         {
-            /* recover rho from v1: kz[1] ≈ rho for small rho */
-            /* more precisely: v1 in UHS is (0,0,a=e^rho), Klein kz = (a²-1)/(a²+1) */
-            /* so a² = (1+kz)/(1-kz), rho = log(a) = log(sqrt((1+kz)/(1-kz))) */
-            double kz1=kz[1];
-            double a_sq=(1.0+kz1)/(1.0-kz1);
-            double a_val=sqrt(a_sq);
+            double a_val=kz[1]; /* v1 UHS t-coordinate = a = e^rho */
             double rho_actual=log(a_val);
             double inv2rho=1.0/(2.0*rho_actual);
 
             for(int v=4;v<=NV;v++){
-                /* Klein → UHS */
-                double kr2=kx[v]*kx[v]+ky[v]*ky[v]+kz[v]*kz[v];
-                double s2=1.0-kr2; if(s2<1e-30) s2=1e-30;
-                double d=1.0-kz[v]; if(fabs(d)<1e-30) d=1e-30;
-                double ux=kx[v]/d, uy=ky[v]/d, ut=sqrt(s2)/d;
-                /* UHS → Euclidean blow-up */
-                e_xvec[3*(v-4)  ]=ux*inv2rho;
-                e_xvec[3*(v-4)+1]=uy*inv2rho;
-                e_xvec[3*(v-4)+2]=(ut>0?log(ut)*inv2rho:0);
+                double x=kx[v], y=ky[v], t=kz[v]; /* UHS coords stored as (x,y,t) */
+                e_xvec[3*(v-4)  ]=x*inv2rho;
+                e_xvec[3*(v-4)+1]=y*inv2rho;
+                e_xvec[3*(v-4)+2]=(t>0?log(t)*inv2rho:0);
             }
         }
 

@@ -470,21 +470,20 @@ int main(int argc, char **argv){
             if(ok){net_ok=1; plan_b++;}
         }
 
-        /* Map to Klein and write OBJ */
+        /* Write UHS OBJ: v1,v2,v3 from ref_triangle, v4+ from g_xvec */
         if(net_ok){
             double a_final=exp(target_rho);
             ref_triangle(a_final);
-            for(int v=1;v<=3;v++)
-                uhs_to_klein(fp_x[v],fp_y[v],fp_t[v],&klein[v][0],&klein[v][1],&klein[v][2]);
-            for(int v=4;v<=NV;v++)
-                uhs_to_klein(GX(v),GY(v),GT(v),&klein[v][0],&klein[v][1],&klein[v][2]);
 
             char path[4096];
             snprintf(path,sizeof(path),"%s/%s.obj",outdir,line);
             FILE *fp=fopen(path,"w");
             if(fp){
-                for(int v=1;v<=NV;v++)
-                    fprintf(fp,"v %.17g %.17g %.17g\n",klein[v][0],klein[v][1],klein[v][2]);
+                fprintf(fp,"v %.17g %.17g %.17g\n",fp_x[1],fp_y[1],fp_t[1]);
+                fprintf(fp,"v %.17g %.17g %.17g\n",fp_x[2],fp_y[2],fp_t[2]);
+                fprintf(fp,"v %.17g %.17g %.17g\n",fp_x[3],fp_y[3],fp_t[3]);
+                for(int v=4;v<=NV;v++)
+                    fprintf(fp,"v %.17g %.17g %.17g\n",GX(v),GY(v),GT(v));
                 for(int i=0;i<NF;i++)
                     fprintf(fp,"f %d %d %d\n",F[i].a,F[i].b,F[i].c);
                 fclose(fp);
