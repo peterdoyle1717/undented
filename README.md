@@ -56,7 +56,8 @@ See PROOF_METHOD.txt for details.
       clers.py                CLERS decoder (Python, for scripting)
       grow_step.c             vertex insertion → offspring names
       neoeuc_c.c              homotopy solver (ideal → Euclidean, with polish)
-      prove_float.py          existence prover (float + IEEE 754 error bounds)
+      prove.c                 existence prover (C, LAPACK SVD, IEEE 754 error bounds)
+      prove_float.py          existence prover (Python, legacy)
       plantri_to_poly         planar_code → face-list converter
       dent_check.c            min link turning (undentedness)
       length_check.c          max edge length deviation

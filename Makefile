@@ -3,8 +3,8 @@
 #   make seed-one  V=12      generate one seed file
 #   make seeds     VMAX=30   generate seed files through VMAX
 #   make primes    VMAX=30   grow primes by recurrence
-#   make solve     VMAX=30   Euclidean embeddings
-#   make prove     VMAX=30   existence proofs
+#   make solve     VMAX=30   Euclidean embeddings (writes .obj or .failed)
+#   make prove     VMAX=30   existence proofs (C prover, requires LAPACK)
 #   make all       VMAX=30   everything
 #   make status               what's done
 
@@ -24,42 +24,22 @@ BIN   = bin
 BUCKYGEN     = $(BIN)/buckygen
 CLERS        = $(BIN)/clers
 GROW_STEP    = $(BIN)/grow_step
-IDEAL        = $(BIN)/ideal
-HYPER        = $(BIN)/hyper
-EUCLID       = $(BIN)/euclid
 SOLVER       = $(BIN)/neoeuc_c
+PROVER       = $(BIN)/prove
 PLANTRI2POLY = src/plantri_to_poly
-PROVER       = src/prove_float.py
 DENT_CHECK   = $(BIN)/dent_check
 LENGTH_CHECK = $(BIN)/length_check
 DEFECT_CHECK = $(BIN)/defect_check
 EMBED_CHECK  = $(BIN)/embed_check
 CHECK_ALL    = $(BIN)/check_all
 
-.PHONY: all tools checkers seed-one seeds primes ideal hyper solve prove check status clean
+.PHONY: all tools checkers seed-one seeds primes solve prove check status clean
 
-# solve target also available via the old monolithic solver:
-solve-old: primes $(SOLVER)
-	@mkdir -p $(RUN)/logs
-	@for v in $$(seq 4 $(VMAX)); do \
-	  [ $$v -eq 5 ] && continue; \
-	  objdir=$(DATA)/obj/$$v; mkdir -p "$$objdir"; \
-	  src=$(DATA)/prime/$$v.txt; \
-	  [ -f "$$src" ] || continue; \
-	  n=$$(wc -l < "$$src" | tr -d ' '); \
-	  [ "$$n" -eq 0 ] && continue; \
-	  have=$$(find "$$objdir" -name '*.obj' -o -name '*.failed' 2>/dev/null | wc -l); \
-	  [ "$$have" -ge "$$n" ] && continue; \
-	  echo "solve-old v=$$v ($$n nets)"; \
-	  nice -n $(NICE) $(SOLVER) "$$objdir" < "$$src" \
-	    2> $(RUN)/logs/solve_$$v.log; \
-	done
-
-all: primes ideal hyper solve prove
+all: primes solve prove
 
 # ── tools ────────────────────────────────────────────────────────────────
 
-tools: $(BUCKYGEN) $(CLERS) $(GROW_STEP) $(IDEAL) $(HYPER) $(EUCLID) $(SOLVER)
+tools: $(BUCKYGEN) $(CLERS) $(GROW_STEP) $(SOLVER) $(PROVER)
 
 checkers: $(DENT_CHECK) $(LENGTH_CHECK) $(DEFECT_CHECK) $(CHECK_ALL)
 
@@ -75,17 +55,11 @@ $(CLERS): src/clers.c | $(BIN)
 $(GROW_STEP): src/grow_step.c | $(BIN)
 	cc -O3 -o $@ $<
 
-$(IDEAL): src/ideal.c | $(BIN)
-	cc -O3 -o $@ $< -lm
-
-$(HYPER): src/hyper.c | $(BIN)
-	cc -O3 -o $@ $< -lm
-
-$(EUCLID): src/euclid.c | $(BIN)
-	cc -O3 -o $@ $< -lm
-
 $(SOLVER): src/neoeuc_c.c | $(BIN)
 	cc -O3 -o $@ $< -lm
+
+$(PROVER): src/prove.c | $(BIN)
+	cc -O3 -o $@ $< -lm -llapack -lblas
 
 $(DENT_CHECK): src/dent_check.c | $(BIN)
 	cc -O3 -o $@ $< -lm
@@ -187,48 +161,12 @@ primes: seeds $(GROW_STEP) $(CLERS)
 	  echo "  prime v=$$vn: $$(wc -l < "$$out" | tr -d ' ')"; \
 	done
 
-# ── ideal ────────────────────────────────────────────────────────────────
-
-ideal: primes $(IDEAL)
-	@for v in $$(seq 4 $(VMAX)); do \
-	  [ $$v -eq 5 ] && continue; \
-	  objdir=$(DATA)/ideal/$$v; mkdir -p "$$objdir"; \
-	  src=$(DATA)/prime/$$v.txt; \
-	  [ -f "$$src" ] || continue; \
-	  n=$$(wc -l < "$$src" | tr -d ' '); \
-	  [ "$$n" -eq 0 ] && continue; \
-	  have=$$(find "$$objdir" -name '*.obj' 2>/dev/null | wc -l); \
-	  [ "$$have" -ge "$$n" ] && continue; \
-	  echo "ideal v=$$v ($$n nets)"; \
-	  $(IDEAL) "$$objdir" < "$$src" 2>&1; \
-	done
-
-# ── hyper ────────────────────────────────────────────────────────────────
-
-TARGET_RHO ?= 0.01
-
-hyper: primes $(HYPER)
-	@for v in $$(seq 4 $(VMAX)); do \
-	  [ $$v -eq 5 ] && continue; \
-	  objdir=$(DATA)/klein/$$v; mkdir -p "$$objdir"; \
-	  src=$(DATA)/prime/$$v.txt; \
-	  [ -f "$$src" ] || continue; \
-	  n=$$(wc -l < "$$src" | tr -d ' '); \
-	  [ "$$n" -eq 0 ] && continue; \
-	  have=$$(find "$$objdir" -name '*.obj' -o -name '*.failed' 2>/dev/null | wc -l); \
-	  [ "$$have" -ge "$$n" ] && continue; \
-	  echo "hyper v=$$v ($$n nets)"; \
-	  nice -n $(NICE) $(HYPER) "$$objdir" $(TARGET_RHO) < "$$src" \
-	    2> $(RUN)/logs/hyper_$$v.log; \
-	done
-
 # ── solve ────────────────────────────────────────────────────────────────
 
-solve: hyper $(EUCLID)
+solve: primes $(SOLVER)
 	@mkdir -p $(RUN)/logs
 	@for v in $$(seq 4 $(VMAX)); do \
 	  [ $$v -eq 5 ] && continue; \
-	  kleindir=$(DATA)/klein/$$v; \
 	  objdir=$(DATA)/obj/$$v; mkdir -p "$$objdir"; \
 	  src=$(DATA)/prime/$$v.txt; \
 	  [ -f "$$src" ] || continue; \
@@ -237,13 +175,13 @@ solve: hyper $(EUCLID)
 	  have=$$(find "$$objdir" -name '*.obj' -o -name '*.failed' 2>/dev/null | wc -l); \
 	  [ "$$have" -ge "$$n" ] && continue; \
 	  echo "solve v=$$v ($$n nets)"; \
-	  nice -n $(NICE) $(EUCLID) "$$kleindir" "$$objdir" $(TARGET_RHO) < "$$src" \
+	  nice -n $(NICE) $(SOLVER) "$$objdir" < "$$src" \
 	    2> $(RUN)/logs/solve_$$v.log; \
 	done
 
 # ── prove ────────────────────────────────────────────────────────────────
 
-prove: solve
+prove: solve $(PROVER)
 	@mkdir -p $(DATA)/proofs
 	@: > $(DATA)/proofs/failures.txt
 	@for v in $$(seq 4 $(VMAX)); do \
@@ -252,15 +190,11 @@ prove: solve
 	  n=$$(find "$$objdir" -name '*.obj' 2>/dev/null | wc -l); \
 	  [ "$$n" -eq 0 ] && continue; \
 	  echo "prove v=$$v ($$n nets)"; \
-	  if [ "$$n" -gt 1000 ] && command -v parallel >/dev/null 2>&1; then \
-	    find "$$objdir" -name '*.obj' | nice -n $(NICE) parallel -j $(JOBS) \
-	      "python3 $(PROVER) {}" 2>/dev/null \
-	      > $(DATA)/proofs/$${v}_float.txt; \
-	  else \
-	    nice -n $(NICE) python3 $(PROVER) "$$objdir/" \
-	      > $(DATA)/proofs/$${v}_float.txt 2>&1; \
-	  fi; \
-	  grep "^#" $(DATA)/proofs/$${v}_float.txt; \
+	  nice -n $(NICE) $(PROVER) "$$objdir" \
+	    > $(DATA)/proofs/$${v}_float.txt 2>/dev/null; \
+	  pass=$$(grep -c PASS $(DATA)/proofs/$${v}_float.txt 2>/dev/null || echo 0); \
+	  fail=$$(grep -c FAIL $(DATA)/proofs/$${v}_float.txt 2>/dev/null || echo 0); \
+	  echo "  pass=$$pass fail=$$fail"; \
 	  grep FAIL $(DATA)/proofs/$${v}_float.txt >> $(DATA)/proofs/failures.txt 2>/dev/null || true; \
 	done
 	@echo ""; n=$$(wc -l < $(DATA)/proofs/failures.txt); \
