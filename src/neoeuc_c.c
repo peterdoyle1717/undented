@@ -549,19 +549,53 @@ int main(int argc, char **argv){
             g_xvec[3*(v-4)+2]=(double)(u[v-1]*u[v-1])/a1;
         }
 
-        int net_ok=1;
+        /* ── try_schedule: homotopy at given rho values, then bisect to Euclidean ── */
+        /* Returns 1 if successful (converged + undented). */
+        int net_ok=0;
 
-        /* finite UHS homotopy: rho = 3*(n+1-fr)/n, fr=1..n */
-        for(int fr=1;fr<=n;fr++){
-            double rho=3.0*(n+1-fr)/n;
-            double a=exp(rho);
-            if(fr>=2){ double rho_prev=3.0*(n+2-fr)/n; predict_step(exp(rho_prev),a); }
-            int iters; double res;
-            int ok=finite_newton(a,&iters,&res);
-            if(!ok) net_ok=0;
+        /* Plan A: 4 big jumps */
+        if(!net_ok){
+            double sched[]={3.0, 1.0, 0.5, 0.25};
+            int nsched=4;
+            double a0=exp(sched[0]);
+            ref_triangle(a0);
+            for(int v=4;v<=NV;v++){
+                g_xvec[3*(v-4)  ]=(double)hz[3*(v-1)+1];
+                g_xvec[3*(v-4)+1]=(double)hz[3*(v-1)+2];
+                g_xvec[3*(v-4)+2]=(double)(u[v-1]*u[v-1])/a0;
+            }
+            int ok=1;
+            for(int s=0;s<nsched;s++){
+                double a=exp(sched[s]);
+                if(s>0) predict_step(exp(sched[s-1]),a);
+                int iters; double res;
+                if(!finite_newton(a,&iters,&res)){ok=0;break;}
+            }
+            if(ok) goto bisect;
         }
 
-        /* bisect rho gap toward 0 until blow-up residual <= 0.10 */
+        /* Plan B: 12 uniform steps */
+        {
+            double a0=exp(3.0);
+            ref_triangle(a0);
+            for(int v=4;v<=NV;v++){
+                g_xvec[3*(v-4)  ]=(double)hz[3*(v-1)+1];
+                g_xvec[3*(v-4)+1]=(double)hz[3*(v-1)+2];
+                g_xvec[3*(v-4)+2]=(double)(u[v-1]*u[v-1])/a0;
+            }
+            int ok=1;
+            for(int fr=1;fr<=n;fr++){
+                double rho=3.0*(n+1-fr)/n;
+                double a=exp(rho);
+                if(fr>=2){ double rho_prev=3.0*(n+2-fr)/n; predict_step(exp(rho_prev),a); }
+                int iters; double res;
+                if(!finite_newton(a,&iters,&res)){ok=0;break;}
+            }
+            if(!ok) goto write_out;
+        }
+
+        bisect:
+        /* bisect rho gap toward 0 until blow-up residual <= 0.10, then Euclidean Newton */
         {
             double rho_cur=3.0/n;
             double rho_gap=rho_cur;
@@ -592,7 +626,6 @@ int main(int argc, char **argv){
             }
             int iters; double res; int bt_total;
             int ok=euclid_newton(&iters,&res,&bt_total);
-            /* polish: Newton with backtracking to avoid worsening residual */
             if(ok){
                 for(int pi=0;pi<20&&res>1e-14;pi++){
                     res=0;
@@ -629,11 +662,13 @@ int main(int argc, char **argv){
             }
             write_frame_euc(NULL, coords);
             int und=undented_check(coords);
-            if(!ok||!und) net_ok=0;
+            if(ok&&und) net_ok=1;
             if(!ok||!und) fprintf(stderr,"FAIL net %ld  bisect=%d  init_res=%.2e  iters=%d  bt=%d  res=%.2e  %s  %s\n",
                     nets, n_bisect, init_res, iters, bt_total, res,
                     ok?"CONVERGED":"FAILED", und?"UNDENTED":"DENTED");
         }
+
+        write_out:
 
         /* write OBJ or .failed */
         if(outdir[0]){
