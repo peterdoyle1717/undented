@@ -394,7 +394,7 @@ int main(int argc, char **argv){
     static double u[MAXV], hz[MAXV*3];
     static double klein[MAXV+1][3];
     int n_uniform = 12;
-    long nets=0, ok_count=0, fail_count=0;
+    long nets=0, ok_count=0, fail_count=0, plan_a=0, plan_b=0;
 
     while(fgets(line,sizeof(line),stdin)){
         int ll=strlen(line);
@@ -414,31 +414,60 @@ int main(int argc, char **argv){
             g_xvec[3*(v-4)+2]=(u[v-1]*u[v-1])/a1;
         }
 
-        int net_ok=1;
+        /* Try schedule: predict+Newton at each rho, return 1 if all converge */
+        int net_ok=0;
 
-        /* Phase 1: n_uniform steps from rho=3 to rho=3/n */
-        for(int fr=1;fr<=n_uniform;fr++){
-            double rho=3.0*(n_uniform+1-fr)/n_uniform;
-            double a=exp(rho);
-            if(fr>=2){ double rho_prev=3.0*(n_uniform+2-fr)/n_uniform; predict_step(exp(rho_prev),a); }
-            int iters; double res;
-            if(!finite_newton(a,&iters,&res)){net_ok=0;break;}
+        /* Plan A: fast — 4 big jumps */
+        {
+            double sched[]={3.0, 1.0, 0.5, target_rho};
+            int nsched=4;
+            /* restore initial guess */
+            double a0=exp(sched[0]);
+            ref_triangle(a0);
+            for(int v=4;v<=NV;v++){
+                g_xvec[3*(v-4)  ]=hz[3*(v-1)+1];
+                g_xvec[3*(v-4)+1]=hz[3*(v-1)+2];
+                g_xvec[3*(v-4)+2]=(u[v-1]*u[v-1])/a0;
+            }
+            int ok=1;
+            for(int s=0;s<nsched;s++){
+                double a=exp(sched[s]);
+                if(s>0) predict_step(exp(sched[s-1]),a);
+                int iters; double res;
+                if(!finite_newton(a,&iters,&res)){ok=0;break;}
+            }
+            if(ok){net_ok=1; plan_a++;}
         }
 
-        /* Phase 2: bisect from rho=3/n down to target_rho */
-        if(net_ok){
-            double rho_cur=3.0/n_uniform;
-            while(rho_cur > target_rho){
-                double rho_new = rho_cur / 2.0;
-                if(rho_new < target_rho) rho_new = target_rho;
-                double a_old=exp(rho_cur), a_new=exp(rho_new);
-                predict_step(a_old, a_new);
-                int iters; double res;
-                if(!finite_newton(a_new,&iters,&res)){
-                    net_ok=0; break;
-                }
-                rho_cur=rho_new;
+        /* Plan B: 12 uniform steps + bisection */
+        if(!net_ok){
+            double a0=exp(3.0);
+            ref_triangle(a0);
+            for(int v=4;v<=NV;v++){
+                g_xvec[3*(v-4)  ]=hz[3*(v-1)+1];
+                g_xvec[3*(v-4)+1]=hz[3*(v-1)+2];
+                g_xvec[3*(v-4)+2]=(u[v-1]*u[v-1])/a0;
             }
+            int ok=1;
+            for(int fr=1;fr<=n_uniform;fr++){
+                double rho=3.0*(n_uniform+1-fr)/n_uniform;
+                double a=exp(rho);
+                if(fr>=2){ double rho_prev=3.0*(n_uniform+2-fr)/n_uniform; predict_step(exp(rho_prev),a); }
+                int iters; double res;
+                if(!finite_newton(a,&iters,&res)){ok=0;break;}
+            }
+            if(ok){
+                double rho_cur=3.0/n_uniform;
+                while(rho_cur > target_rho){
+                    double rho_new = rho_cur / 2.0;
+                    if(rho_new < target_rho) rho_new = target_rho;
+                    predict_step(exp(rho_cur), exp(rho_new));
+                    int iters; double res;
+                    if(!finite_newton(exp(rho_new),&iters,&res)){ok=0;break;}
+                    rho_cur=rho_new;
+                }
+            }
+            if(ok){net_ok=1; plan_b++;}
         }
 
         /* Map to Klein and write OBJ */
@@ -474,7 +503,7 @@ int main(int argc, char **argv){
         build_clear();
         nets++;
     }
-    fprintf(stderr,"hyper: nets=%ld ok=%ld fail=%ld target_rho=%.6e\n",
-            nets,ok_count,fail_count,target_rho);
+    fprintf(stderr,"hyper: nets=%ld ok=%ld fail=%ld planA=%ld planB=%ld target_rho=%.6e\n",
+            nets,ok_count,fail_count,plan_a,plan_b,target_rho);
     return 0;
 }
