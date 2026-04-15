@@ -24,6 +24,7 @@ BIN   = bin
 BUCKYGEN     = $(BIN)/buckygen
 CLERS        = $(BIN)/clers
 GROW_STEP    = $(BIN)/grow_step
+HORODUMP     = $(BIN)/horodump
 SOLVER       = $(BIN)/neoeuc_c
 PROVER       = $(BIN)/prove
 PLANTRI2POLY = src/plantri_to_poly
@@ -33,13 +34,13 @@ DEFECT_CHECK = $(BIN)/defect_check
 EMBED_CHECK  = $(BIN)/embed_check
 CHECK_ALL    = $(BIN)/check_all
 
-.PHONY: all tools checkers seed-one seeds primes solve prove check status clean
+.PHONY: all tools checkers seed-one seeds primes horodump solve prove check status clean
 
-all: primes solve prove
+all: primes horodump solve prove
 
 # ── tools ────────────────────────────────────────────────────────────────
 
-tools: $(BUCKYGEN) $(CLERS) $(GROW_STEP) $(SOLVER) $(PROVER)
+tools: $(BUCKYGEN) $(CLERS) $(GROW_STEP) $(HORODUMP) $(SOLVER) $(PROVER)
 
 checkers: $(DENT_CHECK) $(LENGTH_CHECK) $(DEFECT_CHECK) $(CHECK_ALL)
 
@@ -54,6 +55,9 @@ $(CLERS): src/clers.c | $(BIN)
 
 $(GROW_STEP): src/grow_step.c | $(BIN)
 	cc -O3 -o $@ $<
+
+$(HORODUMP): src/horodump.c src/horosolve.c | $(BIN)
+	cc -O3 -o $@ $< -lm
 
 $(SOLVER): src/neoeuc_c.c | $(BIN)
 	cc -O3 -o $@ $< -lm
@@ -159,6 +163,23 @@ primes: seeds $(GROW_STEP) $(CLERS)
 	  fi; \
 	  mv "$${out}.tmp" "$$out"; \
 	  echo "  prime v=$$vn: $$(wc -l < "$$out" | tr -d ' ')"; \
+	done
+
+# ── horodump ─────────────────────────────────────────────────────────────
+
+horodump: primes $(HORODUMP)
+	@for v in $$(seq 4 $(VMAX)); do \
+	  [ $$v -eq 5 ] && continue; \
+	  objdir=$(DATA)/uhs/$$v; mkdir -p "$$objdir"; \
+	  src=$(DATA)/prime/$$v.txt; \
+	  [ -f "$$src" ] || continue; \
+	  n=$$(wc -l < "$$src" | tr -d ' '); \
+	  [ "$$n" -eq 0 ] && continue; \
+	  have=$$(find "$$objdir" -name '*.uhs' -o -name '*.failed' 2>/dev/null | wc -l); \
+	  [ "$$have" -ge "$$n" ] && continue; \
+	  echo "horodump v=$$v ($$n nets)"; \
+	  nice -n $(NICE) $(HORODUMP) "$$objdir" < "$$src" \
+	    2> $(RUN)/logs/horodump_$$v.log; \
 	done
 
 # ── solve ────────────────────────────────────────────────────────────────
