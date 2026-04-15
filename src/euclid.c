@@ -214,7 +214,6 @@ int main(int argc, char **argv){
 
     double rho = 0.01;
     if(argc>=4) rho = atof(argv[3]);
-    double scale = 1.0/(2.0*rho);
 
     static char line[MAXCODE];
     long nets=0, ok_count=0, fail_count=0;
@@ -234,11 +233,15 @@ int main(int argc, char **argv){
             fail_count++; nets++; continue;
         }
 
-        /* initial guess: scale Klein coords, pin gauge */
+        /* initial guess: Klein → UHS → blow-up */
         for(int v=4;v<=NV;v++){
-            e_xvec[3*(v-4)  ]=kx[v]*scale;
-            e_xvec[3*(v-4)+1]=ky[v]*scale;
-            e_xvec[3*(v-4)+2]=kz[v]*scale;
+            double kr2=kx[v]*kx[v]+ky[v]*ky[v]+kz[v]*kz[v];
+            double s2=1.0-kr2; if(s2<1e-30) s2=1e-30;
+            double d=1.0-kz[v]; if(fabs(d)<1e-30) d=1e-30;
+            double ux=kx[v]/d, uy=ky[v]/d, ut=sqrt(s2)/d;
+            e_xvec[3*(v-4)  ]=ux/(2*rho);
+            e_xvec[3*(v-4)+1]=uy/(2*rho);
+            e_xvec[3*(v-4)+2]=(ut>0?log(ut)/(2*rho):0);
         }
 
         /* Newton */
