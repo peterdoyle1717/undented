@@ -181,32 +181,49 @@ int main(int argc, char **argv){
         double prod=(A2-1)*(A2-1)*(A2-1)*(A6-1);
         ux[3]=sqrt(prod>0?prod:0)/Delta; uy[3]=0; ut[3]=a*(A4-1)/Delta;
 
-        /* UHS→Klein→scale for v1,v2,v3 → pin to gauge instead */
-        /* (Klein scaling of gauge vertices doesn't match the fixed gauge) */
-        /* v4+: UHS→Klein→scale */
-        for(int v=4;v<=NV;v++){
-            double x=frame[1+3*(v-4)],y=frame[1+3*(v-4)+1],t=frame[1+3*(v-4)+2];
+        /* UHS→Klein→scale for ALL vertices (including gauge v1,v2,v3) */
+        static double pos[MAXV+1][3];
+        for(int v=1;v<=NV;v++){
+            double x,y,t;
+            if(v<=3){x=ux[v];y=uy[v];t=ut[v];}
+            else{x=frame[1+3*(v-4)];y=frame[1+3*(v-4)+1];t=frame[1+3*(v-4)+2];}
             double r2=x*x+y*y+t*t, d=r2+1.0;
-            double kx=2*x/d, ky=2*y/d, kz=(r2-1)/d;
-            e_xvec[3*(v-4)  ]=kx*inv2rho;
-            e_xvec[3*(v-4)+1]=ky*inv2rho;
-            e_xvec[3*(v-4)+2]=kz*inv2rho;
+            pos[v][0]=2*x/d*inv2rho;
+            pos[v][1]=2*y/d*inv2rho;
+            pos[v][2]=(r2-1)/d*inv2rho;
         }
 
-        if(do_polish) euclid_polish();
-
-        /* write OBJ (always — prover decides pass/fail) */
-        snprintf(path,sizeof(path),"%s/%s.obj",outdir,line);
-        fp=fopen(path,"w");
-        if(fp){
-            fprintf(fp,"v %.17g %.17g %.17g\n",EC[1][0],EC[1][1],EC[1][2]);
-            fprintf(fp,"v %.17g %.17g %.17g\n",EC[2][0],EC[2][1],EC[2][2]);
-            fprintf(fp,"v %.17g %.17g %.17g\n",EC[3][0],EC[3][1],EC[3][2]);
-            for(int v=4;v<=NV;v++)
-                fprintf(fp,"v %.17g %.17g %.17g\n",e_xvec[3*(v-4)],e_xvec[3*(v-4)+1],e_xvec[3*(v-4)+2]);
-            for(int i=0;i<NF;i++)
-                fprintf(fp,"f %d %d %d\n",F[i].a,F[i].b,F[i].c);
-            fclose(fp);
+        /* write unpolished OBJ */
+        if(!do_polish){
+            snprintf(path,sizeof(path),"%s/%s.obj",outdir,line);
+            fp=fopen(path,"w");
+            if(fp){
+                for(int v=1;v<=NV;v++)
+                    fprintf(fp,"v %.17g %.17g %.17g\n",pos[v][0],pos[v][1],pos[v][2]);
+                for(int i=0;i<NF;i++)
+                    fprintf(fp,"f %d %d %d\n",F[i].a,F[i].b,F[i].c);
+                fclose(fp);
+            }
+        } else {
+            /* polish: pin gauge, Newton on v4+ */
+            for(int v=4;v<=NV;v++){
+                e_xvec[3*(v-4)  ]=pos[v][0];
+                e_xvec[3*(v-4)+1]=pos[v][1];
+                e_xvec[3*(v-4)+2]=pos[v][2];
+            }
+            euclid_polish();
+            snprintf(path,sizeof(path),"%s/%s.obj",outdir,line);
+            fp=fopen(path,"w");
+            if(fp){
+                fprintf(fp,"v %.17g %.17g %.17g\n",EC[1][0],EC[1][1],EC[1][2]);
+                fprintf(fp,"v %.17g %.17g %.17g\n",EC[2][0],EC[2][1],EC[2][2]);
+                fprintf(fp,"v %.17g %.17g %.17g\n",EC[3][0],EC[3][1],EC[3][2]);
+                for(int v=4;v<=NV;v++)
+                    fprintf(fp,"v %.17g %.17g %.17g\n",e_xvec[3*(v-4)],e_xvec[3*(v-4)+1],e_xvec[3*(v-4)+2]);
+                for(int i=0;i<NF;i++)
+                    fprintf(fp,"f %d %d %d\n",F[i].a,F[i].b,F[i].c);
+                fclose(fp);
+            }
         }
         ok_count++;
 
