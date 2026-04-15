@@ -1,11 +1,12 @@
 /* euclidsolve.c — UHS last frame → Euclidean OBJ
  *
- * Reads .uhs files (from horodump), takes the last frame,
- * blows up to Euclidean coordinates, optionally polishes
- * with Newton (undented backtracking).
+ * Reads binary .uhs files (from horodump), takes the last frame,
+ * maps UHS→Klein, scales by 1/(2ρ) for Euclidean initial guess,
+ * optionally polishes with Newton (residual backtracking, no dent gating).
+ * Always writes .obj — the prover decides if it passes.
  *
- * Blow-up: x/(2ρ), y/(2ρ), log(t)/(2ρ)
  * Gauge: v1=(0,0,½), v2=(0,0,-½), v3=(√3/2,0,0)
+ *   applied by pinning v1,v2,v3 to gauge positions.
  *
  * Usage:   ./euclidsolve [-polish] indir outdir < names.txt
  * Compile: cc -O3 -o euclidsolve euclidsolve.c -lm
@@ -15,6 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <float.h>
 
 #define MAXV    400
 #define MAXF    (2*MAXV+4)
@@ -78,7 +80,6 @@ static int decode(const char*code){
         if(!lbl[a])lbl[a]=++k;if(!lbl[b])lbl[b]=++k;if(!lbl[c])lbl[c]=++k;F[ntris-1-i]=(Face){lbl[a],lbl[b],lbl[c]};}
     NF=ntris;NV=k;return ntris;
 }
-static int cyclic_nbrs(int v,int ring[]){if(!NNBR[v])return 0;int start=NBR[v][0];ring[0]=start;int k=1,cur=start;for(;;){int nxt=EM[v][cur];if(nxt==start)break;ring[k++]=nxt;cur=nxt;}return k;}
 
 /* ── Euclidean coords ────────────────────────────────────────────────────── */
 static double e_xvec[MAXFN];
@@ -87,32 +88,7 @@ static const double EC[4][3]={{0,0,0},{0,0,0.5},{0,0,-0.5},{0.8660254037844387,0
 #define EY(v) ((v)<=3?EC[v][1]:e_xvec[3*((v)-4)+1])
 #define EZ(v) ((v)<=3?EC[v][2]:e_xvec[3*((v)-4)+2])
 
-/* ── undented check ──────────────────────────────────────────────────────── */
-static double signed_sph_angle(double ax,double ay,double az,double bx,double by,double bz,double cx,double cy,double cz){
-    double acx=ay*cz-az*cy,acy=az*cx-ax*cz,acz=ax*cy-ay*cx;
-    double num=bx*acx+by*acy+bz*acz;
-    double den=(ax*bx+ay*by+az*bz)*(bx*cx+by*cy+bz*cz)-(ax*cx+ay*cy+az*cz);
-    return atan2(num,den);
-}
-static int undented_check(void){
-    int ring[MAXRING]; double min_t=1e30;
-    for(int v=1;v<=NV;v++){
-        int k=cyclic_nbrs(v,ring);if(k<3)continue;
-        double dx[MAXRING],dy[MAXRING],dz[MAXRING];
-        for(int i=0;i<k;i++){int w=ring[i];
-            double ex=EX(w)-EX(v),ey=EY(w)-EY(v),ez=EZ(w)-EZ(v);
-            double L=sqrt(ex*ex+ey*ey+ez*ez);if(L<1e-30)L=1e-30;
-            dx[i]=ex/L;dy[i]=ey/L;dz[i]=ez/L;}
-        double tv=0;
-        for(int i=0;i<k;i++)
-            tv+=signed_sph_angle(dx[(i-1+k)%k],dy[(i-1+k)%k],dz[(i-1+k)%k],
-                                  dx[i],dy[i],dz[i],dx[(i+1)%k],dy[(i+1)%k],dz[(i+1)%k]);
-        if(tv<min_t)min_t=tv;
-    }
-    return (min_t>=0.0)?1:0;
-}
-
-/* ── Newton solver ───────────────────────────────────────────────────────── */
+/* ── Newton solver (residual backtracking only) ──────────────────────────── */
 static double NJmat[MAXFN][MAXFN],NFvec[MAXFN];
 static int lu_solve_n(int n){
     for(int col=0;col<n;col++){int piv=col;double best=fabs(NJmat[col][col]);
@@ -121,40 +97,37 @@ static int lu_solve_n(int n){
         double inv=1.0/NJmat[col][col];for(int row=col+1;row<n;row++){double fac=NJmat[row][col]*inv;for(int k=col;k<n;k++)NJmat[row][k]-=fac*NJmat[col][k];NFvec[row]-=fac*NFvec[col];}}
     for(int i=n-1;i>=0;i--){double s=NFvec[i];for(int j=i+1;j<n;j++)s-=NJmat[i][j]*NFvec[j];NFvec[i]=s/NJmat[i][i];}return 0;}
 
-static int euclid_newton(int *iters_out, double *res_out){
-    int n=3*(NV-3); double res=1e30; int iter; int lufail=0;
-    for(iter=0;iter<50;iter++){
-        res=0;
+static void euclid_polish(void){
+    int n=3*(NV-3);
+    for(int iter=0;iter<50;iter++){
+        double res=0;
         for(int k=0;k<n_edges;k++){int i=eu[k],j=ev[k];
             double dx=EX(i)-EX(j),dy=EY(i)-EY(j),dz=EZ(i)-EZ(j);
             NFvec[k]=dx*dx+dy*dy+dz*dz-1.0;
             double af=fabs(NFvec[k]);if(af>res)res=af;}
-        if(res<1e-10) break;
+        if(res<1e-14) break;
         memset(NJmat,0,sizeof(double)*(size_t)n*MAXFN);
         for(int k=0;k<n_edges;k++){int i=eu[k],j=ev[k];
             double dx=EX(i)-EX(j),dy=EY(i)-EY(j),dz=EZ(i)-EZ(j);
             if(i>=4){int ci=3*(i-4);NJmat[k][ci]+=2*dx;NJmat[k][ci+1]+=2*dy;NJmat[k][ci+2]+=2*dz;}
             if(j>=4){int cj=3*(j-4);NJmat[k][cj]-=2*dx;NJmat[k][cj+1]-=2*dy;NJmat[k][cj+2]-=2*dz;}}
         for(int k=0;k<n;k++)NFvec[k]=-NFvec[k];
-        if(lu_solve_n(n)<0){lufail=1;break;}
-        /* backtrack: reject steps that worsen residual or dent */
+        if(lu_solve_n(n)<0)break;
         double step=1.0;
-        double save[MAXFN]; memcpy(save,e_xvec,sizeof(double)*n);
-        int accepted=0;
-        for(int bt=0;bt<60;bt++,step*=0.5){
-            for(int k=0;k<n;k++)e_xvec[k]=save[k]+step*NFvec[k];
+        for(int bt=0;bt<40;bt++,step*=0.5){
             double res2=0;
             for(int k=0;k<n_edges;k++){int i=eu[k],j=ev[k];
-                double dx=EX(i)-EX(j),dy=EY(i)-EY(j),dz=EZ(i)-EZ(j);
+                double dx=(i>=4?EX(i)+step*NFvec[3*(i-4)]:EX(i))-(j>=4?EX(j)+step*NFvec[3*(j-4)]:EX(j));
+                double dy=(i>=4?EY(i)+step*NFvec[3*(i-4)+1]:EY(i))-(j>=4?EY(j)+step*NFvec[3*(j-4)+1]:EY(j));
+                double dz=(i>=4?EZ(i)+step*NFvec[3*(i-4)+2]:EZ(i))-(j>=4?EZ(j)+step*NFvec[3*(j-4)+2]:EZ(j));
                 double af=fabs(dx*dx+dy*dy+dz*dz-1.0);if(af>res2)res2=af;}
-            if(res2>=res)continue;
-            if(!undented_check())continue;
-            accepted=1;break;
+            if(res2<res)break;
         }
-        if(!accepted)memcpy(e_xvec,save,sizeof(double)*n);
+        for(int v=4;v<=NV;v++){
+            e_xvec[3*(v-4)  ]+=step*NFvec[3*(v-4)  ];
+            e_xvec[3*(v-4)+1]+=step*NFvec[3*(v-4)+1];
+            e_xvec[3*(v-4)+2]+=step*NFvec[3*(v-4)+2];}
     }
-    *iters_out=iter; *res_out=res;
-    return (!lufail && res<1e-8)?1:0;
 }
 
 /* ── main ────────────────────────────────────────────────────────────────── */
@@ -166,7 +139,7 @@ int main(int argc, char **argv){
     char *indir=argv[argi], *outdir=argv[argi+1];
 
     static char line[MAXCODE];
-    long nets=0, ok_count=0, fail_count=0, dented=0;
+    long nets=0, ok_count=0, fail_count=0;
 
     while(fgets(line,sizeof(line),stdin)){
         int ll=strlen(line);
@@ -175,79 +148,72 @@ int main(int argc, char **argv){
         if(!decode(line)){fprintf(stderr,"decode failed: %s\n",line);continue;}
         build(); collect_edges();
 
-        /* read last frame from .uhs file */
+        int n=3*(NV-3);
+
+        /* read binary .uhs file */
         char path[4096];
         snprintf(path,sizeof(path),"%s/%s.uhs",indir,line);
-        FILE *fp=fopen(path,"r");
+        FILE *fp=fopen(path,"rb");
         if(!fp){
-            /* no .uhs — propagate failure */
             snprintf(path,sizeof(path),"%s/%s.failed",outdir,line);
             FILE *ff=fopen(path,"w");if(ff)fclose(ff);
             fail_count++;nets++;build_clear();continue;
         }
-        /* read last line */
-        char lastline[65536]; lastline[0]='\0';
-        char buf[65536];
-        while(fgets(buf,sizeof(buf),fp)) strcpy(lastline,buf);
+        int nv_file,nframes;
+        fread(&nv_file,sizeof(int),1,fp);
+        fread(&nframes,sizeof(int),1,fp);
+        int cpf=1+n; /* doubles per frame: rho + 3*(NV-3) */
+        /* seek to last frame */
+        fseek(fp,sizeof(int)*2+(long)(nframes-1)*cpf*sizeof(double),SEEK_SET);
+        static double frame[1+3*MAXV];
+        fread(frame,sizeof(double),cpf,fp);
         fclose(fp);
 
-        /* parse: rho x4 y4 t4 x5 y5 t5 ... */
-        double rho_f;
-        int pos=0; int nr;
-        sscanf(lastline,"%lf%n",&rho_f,&nr); pos+=nr;
+        double rho_f=frame[0];
+        double a=exp(rho_f);
         double inv2rho=1.0/(2.0*rho_f);
+
+        /* ref triangle in UHS */
+        double A2=a*a,A4=A2*A2,A6=A4*A2,Delta=A6-A4+A2-1.0;
+        double ux[4],uy[4],ut[4];
+        ux[1]=0;uy[1]=0;ut[1]=a;
+        ux[2]=0;uy[2]=0;ut[2]=1.0/a;
+        double prod=(A2-1)*(A2-1)*(A2-1)*(A6-1);
+        ux[3]=sqrt(prod>0?prod:0)/Delta; uy[3]=0; ut[3]=a*(A4-1)/Delta;
+
+        /* UHS→Klein→scale for v1,v2,v3 → pin to gauge instead */
+        /* (Klein scaling of gauge vertices doesn't match the fixed gauge) */
+        /* v4+: UHS→Klein→scale */
         for(int v=4;v<=NV;v++){
-            double x,y,t;
-            sscanf(lastline+pos," %lf %lf %lf%n",&x,&y,&t,&nr); pos+=nr;
-            e_xvec[3*(v-4)  ]=x*inv2rho;
-            e_xvec[3*(v-4)+1]=y*inv2rho;
-            e_xvec[3*(v-4)+2]=(t>0?log(t)*inv2rho:0);
+            double x=frame[1+3*(v-4)],y=frame[1+3*(v-4)+1],t=frame[1+3*(v-4)+2];
+            double r2=x*x+y*y+t*t, d=r2+1.0;
+            double kx=2*x/d, ky=2*y/d, kz=(r2-1)/d;
+            e_xvec[3*(v-4)  ]=kx*inv2rho;
+            e_xvec[3*(v-4)+1]=ky*inv2rho;
+            e_xvec[3*(v-4)+2]=kz*inv2rho;
         }
 
-        /* check undented before polish */
-        int und=undented_check();
-        if(!und) dented++;
+        if(do_polish) euclid_polish();
 
-        /* compute unpolished residual */
-        double res_before=0;
-        for(int k=0;k<n_edges;k++){int i=eu[k],j=ev[k];
-            double dx=EX(i)-EX(j),dy=EY(i)-EY(j),dz=EZ(i)-EZ(j);
-            double af=fabs(dx*dx+dy*dy+dz*dz-1.0);if(af>res_before)res_before=af;}
-
-        /* polish if requested */
-        double res_after=res_before;
-        int ok=1;
-        if(do_polish && und){
-            int iters;
-            ok=euclid_newton(&iters,&res_after);
-            und=undented_check();
+        /* write OBJ (always — prover decides pass/fail) */
+        snprintf(path,sizeof(path),"%s/%s.obj",outdir,line);
+        fp=fopen(path,"w");
+        if(fp){
+            fprintf(fp,"v %.17g %.17g %.17g\n",EC[1][0],EC[1][1],EC[1][2]);
+            fprintf(fp,"v %.17g %.17g %.17g\n",EC[2][0],EC[2][1],EC[2][2]);
+            fprintf(fp,"v %.17g %.17g %.17g\n",EC[3][0],EC[3][1],EC[3][2]);
+            for(int v=4;v<=NV;v++)
+                fprintf(fp,"v %.17g %.17g %.17g\n",e_xvec[3*(v-4)],e_xvec[3*(v-4)+1],e_xvec[3*(v-4)+2]);
+            for(int i=0;i<NF;i++)
+                fprintf(fp,"f %d %d %d\n",F[i].a,F[i].b,F[i].c);
+            fclose(fp);
         }
-
-        /* write OBJ */
-        if(und){
-            snprintf(path,sizeof(path),"%s/%s.obj",outdir,line);
-            fp=fopen(path,"w");
-            if(fp){
-                fprintf(fp,"v %.17g %.17g %.17g\n",EC[1][0],EC[1][1],EC[1][2]);
-                fprintf(fp,"v %.17g %.17g %.17g\n",EC[2][0],EC[2][1],EC[2][2]);
-                fprintf(fp,"v %.17g %.17g %.17g\n",EC[3][0],EC[3][1],EC[3][2]);
-                for(int v=4;v<=NV;v++)
-                    fprintf(fp,"v %.17g %.17g %.17g\n",e_xvec[3*(v-4)],e_xvec[3*(v-4)+1],e_xvec[3*(v-4)+2]);
-                for(int i=0;i<NF;i++)
-                    fprintf(fp,"f %d %d %d\n",F[i].a,F[i].b,F[i].c);
-                fclose(fp);
-            }
-            ok_count++;
-        } else {
-            snprintf(path,sizeof(path),"%s/%s.failed",outdir,line);
-            fp=fopen(path,"w");if(fp)fclose(fp);
-            fail_count++;
-        }
+        ok_count++;
 
         build_clear();
         nets++;
     }
-    fprintf(stderr,"euclidsolve: nets=%ld ok=%ld fail=%ld dented_before_polish=%ld polish=%s\n",
-            nets,ok_count,fail_count,dented,do_polish?"yes":"no");
+    fprintf(stderr,"euclidsolve: nets=%ld ok=%ld fail=%ld polish=%s\n",
+            nets,ok_count,fail_count,do_polish?"yes":"no");
     return 0;
 }
