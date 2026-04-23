@@ -1,12 +1,19 @@
 # undented — prime neoplatonic solids: enumerate, solve, prove
 #
-#   make seed-one  V=12      generate one seed file
-#   make seeds     VMAX=30   generate seed files through VMAX
-#   make primes    VMAX=30   grow primes by recurrence
-#   make solve     VMAX=30   Euclidean embeddings (writes .obj or .failed)
-#   make prove     VMAX=30   existence proofs (C prover, requires LAPACK)
-#   make all       VMAX=30   everything
-#   make status               what's done
+# Pipeline (see SPEC.md):  prime → horodump2 → pusheuclid → polish → prove
+#                                              ( + preapproved shortcut
+#                                              + mma-residual fallback )
+#
+# Common targets:
+#   make seeds      VMAX=30   generate seed files through VMAX
+#   make primes     VMAX=30   enumerate prime CLERS
+#   make horodump2  VMAX=30   UHS homotopy with dent guard
+#   make pusheuclid VMAX=30   Klein-expand last UHS frame → Euclidean OBJ
+#   make polish     VMAX=30   edge-length Newton (+ Plan B bigface fallback)
+#   make prove      VMAX=30   Plan A existence proofs (LAPACK)
+#   make all        VMAX=30   primes → horodump2 → pusheuclid → polish → prove
+#   make status               count PASS/FAIL per stage
+#   make clean                remove bin/
 
 VMAX  ?= 30
 V     ?= 12
@@ -24,8 +31,9 @@ BIN   = bin
 BUCKYGEN     = $(BIN)/buckygen
 CLERS        = $(BIN)/clers
 GROW_STEP    = $(BIN)/grow_step
-HORODUMP     = $(BIN)/horodump
-SOLVER       = $(BIN)/neoeuc_c
+HORODUMP2    = $(BIN)/horodump2
+EUCLIDSOLVE  = $(BIN)/euclidsolve
+POLISH       = $(BIN)/polish
 PROVER       = $(BIN)/prove
 PLANTRI2POLY = src/plantri_to_poly
 DENT_CHECK   = $(BIN)/dent_check
@@ -34,13 +42,13 @@ DEFECT_CHECK = $(BIN)/defect_check
 EMBED_CHECK  = $(BIN)/embed_check
 CHECK_ALL    = $(BIN)/check_all
 
-.PHONY: all tools checkers seed-one seeds primes horodump solve prove check status clean
+.PHONY: all tools checkers seed-one seeds primes horodump2 pusheuclid polish prove check status clean mma-residual
 
-all: primes horodump solve prove
+all: primes horodump2 pusheuclid polish prove
 
 # ── tools ────────────────────────────────────────────────────────────────
 
-tools: $(BUCKYGEN) $(CLERS) $(GROW_STEP) $(HORODUMP) $(SOLVER) $(PROVER)
+tools: $(BUCKYGEN) $(CLERS) $(GROW_STEP) $(HORODUMP2) $(EUCLIDSOLVE) $(POLISH) $(PROVER)
 
 checkers: $(DENT_CHECK) $(LENGTH_CHECK) $(DEFECT_CHECK) $(CHECK_ALL)
 
@@ -56,10 +64,13 @@ $(CLERS): src/clers.c | $(BIN)
 $(GROW_STEP): src/grow_step.c | $(BIN)
 	cc -O3 -o $@ $<
 
-$(HORODUMP): src/horodump.c src/horosolve.c | $(BIN)
+$(HORODUMP2): src/horodump2.c src/horosolve.c | $(BIN)
 	cc -O3 -o $@ $< -lm
 
-$(SOLVER): src/neoeuc_c.c | $(BIN)
+$(EUCLIDSOLVE): src/euclidsolve.c | $(BIN)
+	cc -O3 -o $@ $< -lm
+
+$(POLISH): src/polish.c | $(BIN)
 	cc -O3 -o $@ $< -lm
 
 $(PROVER): src/prove.c | $(BIN)
@@ -165,68 +176,162 @@ primes: seeds $(GROW_STEP) $(CLERS)
 	  echo "  prime v=$$vn: $$(wc -l < "$$out" | tr -d ' ')"; \
 	done
 
-# ── horodump ─────────────────────────────────────────────────────────────
+# ── horodump2 ────────────────────────────────────────────────────────────
 
-horodump: primes $(HORODUMP)
+horodump2: primes $(HORODUMP2)
+	@mkdir -p $(RUN)/logs $(RUN)/tmp
 	@for v in $$(seq 4 $(VMAX)); do \
 	  [ $$v -eq 5 ] && continue; \
-	  objdir=$(DATA)/uhs/$$v; mkdir -p "$$objdir"; \
+	  outdir=$(DATA)/uhs/$$v; mkdir -p "$$outdir"; \
 	  src=$(DATA)/prime/$$v.txt; \
 	  [ -f "$$src" ] || continue; \
 	  n=$$(wc -l < "$$src" | tr -d ' '); \
 	  [ "$$n" -eq 0 ] && continue; \
-	  have=$$(find "$$objdir" -name '*.uhs' -o -name '*.failed' 2>/dev/null | wc -l); \
-	  [ "$$have" -ge "$$n" ] && continue; \
-	  echo "horodump v=$$v ($$n nets)"; \
-	  nice -n $(NICE) $(HORODUMP) "$$objdir" < "$$src" \
-	    2> $(RUN)/logs/horodump_$$v.log; \
+	  have=$$(find "$$outdir" \( -name '*.uhs' -o -name '*.failed' \) 2>/dev/null | wc -l); \
+	  [ "$$have" -ge "$$n" ] && echo "horodump2 v=$$v: done ($$have)" && continue; \
+	  echo "horodump2 v=$$v: $$have/$$n, running..."; \
+	  if command -v parallel >/dev/null 2>&1; then \
+	    split -n l/$(JOBS) "$$src" $(RUN)/tmp/horodump2_$${v}_; \
+	    nice -n $(NICE) parallel -j $(JOBS) \
+	      "$(HORODUMP2) $$outdir < {}" ::: $(RUN)/tmp/horodump2_$${v}_* \
+	      2> $(RUN)/logs/horodump2_$$v.log; \
+	    rm -f $(RUN)/tmp/horodump2_$${v}_*; \
+	  else \
+	    nice -n $(NICE) $(HORODUMP2) "$$outdir" < "$$src" \
+	      2> $(RUN)/logs/horodump2_$$v.log; \
+	  fi; \
+	  ok=$$(find "$$outdir" -name '*.uhs'    | wc -l); \
+	  fail=$$(find "$$outdir" -name '*.failed' | wc -l); \
+	  echo "  horodump2 v=$$v: ok=$$ok fail=$$fail"; \
 	done
 
-# ── solve ────────────────────────────────────────────────────────────────
+# ── pusheuclid (euclidsolve, no -polish) ─────────────────────────────────
 
-solve: primes $(SOLVER)
-	@mkdir -p $(RUN)/logs
+pusheuclid: horodump2 $(EUCLIDSOLVE)
+	@mkdir -p $(RUN)/logs $(RUN)/tmp
 	@for v in $$(seq 4 $(VMAX)); do \
 	  [ $$v -eq 5 ] && continue; \
-	  objdir=$(DATA)/obj/$$v; mkdir -p "$$objdir"; \
+	  indir=$(DATA)/uhs/$$v; \
+	  outdir=$(DATA)/pusheuclid/$$v; mkdir -p "$$outdir"; \
 	  src=$(DATA)/prime/$$v.txt; \
 	  [ -f "$$src" ] || continue; \
 	  n=$$(wc -l < "$$src" | tr -d ' '); \
 	  [ "$$n" -eq 0 ] && continue; \
-	  have=$$(find "$$objdir" -name '*.obj' -o -name '*.failed' 2>/dev/null | wc -l); \
-	  [ "$$have" -ge "$$n" ] && continue; \
-	  echo "solve v=$$v ($$n nets)"; \
-	  nice -n $(NICE) $(SOLVER) "$$objdir" < "$$src" \
-	    2> $(RUN)/logs/solve_$$v.log; \
+	  have=$$(find "$$outdir" \( -name '*.obj' -o -name '*.fail' \) 2>/dev/null | wc -l); \
+	  [ "$$have" -ge "$$n" ] && echo "pusheuclid v=$$v: done ($$have)" && continue; \
+	  echo "pusheuclid v=$$v: $$have/$$n, running..."; \
+	  if command -v parallel >/dev/null 2>&1; then \
+	    split -n l/$(JOBS) "$$src" $(RUN)/tmp/pusheuclid_$${v}_; \
+	    nice -n $(NICE) parallel -j $(JOBS) \
+	      "$(EUCLIDSOLVE) $$indir $$outdir < {}" ::: $(RUN)/tmp/pusheuclid_$${v}_* \
+	      2> $(RUN)/logs/pusheuclid_$$v.log; \
+	    rm -f $(RUN)/tmp/pusheuclid_$${v}_*; \
+	  else \
+	    nice -n $(NICE) $(EUCLIDSOLVE) "$$indir" "$$outdir" < "$$src" \
+	      2> $(RUN)/logs/pusheuclid_$$v.log; \
+	  fi; \
+	  ok=$$(find "$$outdir" -name '*.obj'  | wc -l); \
+	  fail=$$(find "$$outdir" -name '*.fail' | wc -l); \
+	  echo "  pusheuclid v=$$v: ok=$$ok fail=$$fail"; \
 	done
 
-# ── prove ────────────────────────────────────────────────────────────────
+# ── polish ───────────────────────────────────────────────────────────────
 
-prove: solve $(PROVER)
-	@mkdir -p $(DATA)/proofs
+polish: pusheuclid $(POLISH)
+	@mkdir -p $(RUN)/logs $(RUN)/tmp
+	@for v in $$(seq 4 $(VMAX)); do \
+	  [ $$v -eq 5 ] && continue; \
+	  indir=$(DATA)/pusheuclid/$$v; \
+	  outdir=$(DATA)/polish/$$v; mkdir -p "$$outdir"; \
+	  names=$$(find "$$indir" -name '*.obj' 2>/dev/null | sed 's|.*/||; s|\.obj$$||'); \
+	  n=$$(printf "%s\n" $$names | grep -c . || true); \
+	  [ "$$n" -eq 0 ] && continue; \
+	  have=$$(find "$$outdir" \( -name '*.obj' -o -name '*.fail' \) 2>/dev/null | wc -l); \
+	  [ "$$have" -ge "$$n" ] && echo "polish v=$$v: done ($$have)" && continue; \
+	  echo "polish v=$$v: $$have/$$n, running..."; \
+	  printf "%s\n" $$names > $(RUN)/tmp/polish_names_$$v.txt; \
+	  if command -v parallel >/dev/null 2>&1; then \
+	    split -n l/$(JOBS) $(RUN)/tmp/polish_names_$$v.txt $(RUN)/tmp/polish_$${v}_; \
+	    nice -n $(NICE) parallel -j $(JOBS) \
+	      "$(POLISH) $$indir $$outdir < {}" ::: $(RUN)/tmp/polish_$${v}_* \
+	      2> $(RUN)/logs/polish_$$v.log; \
+	    rm -f $(RUN)/tmp/polish_$${v}_*; \
+	  else \
+	    nice -n $(NICE) $(POLISH) "$$indir" "$$outdir" \
+	      < $(RUN)/tmp/polish_names_$$v.txt \
+	      2> $(RUN)/logs/polish_$$v.log; \
+	  fi; \
+	  rm -f $(RUN)/tmp/polish_names_$$v.txt; \
+	  ok=$$(find "$$outdir" -name '*.obj'  | wc -l); \
+	  fail=$$(find "$$outdir" -name '*.fail' | wc -l); \
+	  echo "  polish v=$$v: ok=$$ok fail=$$fail"; \
+	done
+
+# ── prove (Plan A, C prover, with preapproved shortcut) ──────────────────
+
+prove: polish $(PROVER)
+	@mkdir -p $(DATA)/proofs $(RUN)/logs $(RUN)/tmp
 	@: > $(DATA)/proofs/failures.txt
 	@for v in $$(seq 4 $(VMAX)); do \
 	  [ $$v -eq 5 ] && continue; \
-	  objdir=$(DATA)/obj/$$v; \
+	  objdir=$(DATA)/polish/$$v; \
 	  n=$$(find "$$objdir" -name '*.obj' 2>/dev/null | wc -l); \
 	  [ "$$n" -eq 0 ] && continue; \
-	  echo "prove v=$$v ($$n nets)"; \
-	  nice -n $(NICE) $(PROVER) "$$objdir" \
-	    > $(DATA)/proofs/$${v}_float.txt 2>/dev/null; \
+	  preapproved=preapproved/data/$$v.txt; \
+	  if [ -f "$$preapproved" ]; then \
+	    papp=$$(wc -l < "$$preapproved" | tr -d ' '); \
+	  else \
+	    papp=0; \
+	  fi; \
+	  echo "prove v=$$v ($$n nets, $$papp preapproved skipped)"; \
+	  if [ -f "$$preapproved" ]; then \
+	    find "$$objdir" -name '*.obj' | \
+	      awk -v pa="$$preapproved" 'BEGIN{while((getline l < pa)>0)p[l]=1} \
+	                                 {n=$$0; sub(/.*\//,"",n); sub(/\.obj$$/,"",n); if(!(n in p)) print}' \
+	      > $(RUN)/tmp/prove_$${v}_list.txt; \
+	  else \
+	    find "$$objdir" -name '*.obj' > $(RUN)/tmp/prove_$${v}_list.txt; \
+	  fi; \
+	  if command -v parallel >/dev/null 2>&1; then \
+	    split -n l/$(JOBS) $(RUN)/tmp/prove_$${v}_list.txt $(RUN)/tmp/pchunk_$${v}_; \
+	    nice -n $(NICE) parallel -j $(JOBS) \
+	      "while read f; do $(PROVER) \"\$$f\"; done < {}" ::: $(RUN)/tmp/pchunk_$${v}_* \
+	      > $(DATA)/proofs/$${v}_float.txt 2> $(RUN)/logs/prove_$$v.log; \
+	    rm -f $(RUN)/tmp/pchunk_$${v}_*; \
+	  else \
+	    while read f; do $(PROVER) "$$f"; done < $(RUN)/tmp/prove_$${v}_list.txt \
+	      > $(DATA)/proofs/$${v}_float.txt; \
+	  fi; \
+	  rm -f $(RUN)/tmp/prove_$${v}_list.txt; \
 	  pass=$$(grep -c PASS $(DATA)/proofs/$${v}_float.txt 2>/dev/null || echo 0); \
 	  fail=$$(grep -c FAIL $(DATA)/proofs/$${v}_float.txt 2>/dev/null || echo 0); \
-	  echo "  pass=$$pass fail=$$fail"; \
+	  echo "  pass=$$pass fail=$$fail (plus $$papp preapproved)"; \
 	  grep FAIL $(DATA)/proofs/$${v}_float.txt >> $(DATA)/proofs/failures.txt 2>/dev/null || true; \
 	done
-	@echo ""; n=$$(wc -l < $(DATA)/proofs/failures.txt); \
-	echo "=== $$n failures — see data/proofs/failures.txt ==="
+	@n=$$(wc -l < $(DATA)/proofs/failures.txt); \
+	echo ""; \
+	echo "=== $$n prove-failures (Plan A) — run 'make mma-residual' to close them ==="
+
+# ── mma-residual: MMA fallback to close the prove-failures ──────────────
+# Requires wolframscript on PATH. Run AFTER `make prove`.
+
+mma-residual:
+	@if ! command -v wolframscript >/dev/null 2>&1; then \
+	  echo "wolframscript not on PATH — needed for mma-residual"; exit 1; fi
+	@n=$$(wc -l < $(DATA)/proofs/failures.txt 2>/dev/null || echo 0); \
+	if [ "$$n" -eq 0 ]; then \
+	  echo "no failures to close"; exit 0; \
+	fi; \
+	echo "closing $$n Plan-A failures with MMA residual batch..."; \
+	wolframscript -f mma/prove_residual_batch.wls $(DATA)/proofs/failures.txt \
+	  | tee $(DATA)/proofs/mma_residual.log
 
 # ── check ────────────────────────────────────────────────────────────────
 
 check: checkers
 	@for v in $$(seq 4 $(VMAX)); do \
 	  [ $$v -eq 5 ] && continue; \
-	  objdir=$(DATA)/obj/$$v; \
+	  objdir=$(DATA)/polish/$$v; \
 	  n=$$(find "$$objdir" -name '*.obj' 2>/dev/null | wc -l); \
 	  [ "$$n" -eq 0 ] && continue; \
 	  echo "check v=$$v ($$n nets)"; \
@@ -236,12 +341,28 @@ check: checkers
 # ── status ───────────────────────────────────────────────────────────────
 
 status:
-	@for f in $(DATA)/proofs/*_float.txt; do \
-	  [ -f "$$f" ] || continue; \
-	  v=$$(basename $$f _float.txt); \
-	  p=$$(grep -c PASS "$$f" 2>/dev/null || true); \
-	  f=$$(grep -c FAIL "$$f" 2>/dev/null || true); \
-	  printf "v=%3s: %8s pass, %3s fail\n" "$$v" "$$p" "$$f"; \
+	@echo "stage      v    ok    fail   total"
+	@echo "---------  ---  ----  -----  -----"
+	@for v in $$(seq 4 $(VMAX)); do \
+	  [ $$v -eq 5 ] && continue; \
+	  src=$(DATA)/prime/$$v.txt; \
+	  [ -f "$$src" ] || continue; \
+	  total=$$(wc -l < "$$src" | tr -d ' '); \
+	  [ "$$total" -eq 0 ] && continue; \
+	  for stage in uhs:uhs:failed pusheuclid:obj:fail polish:obj:fail; do \
+	    dir=$$(echo $$stage | cut -d: -f1); \
+	    okext=$$(echo $$stage | cut -d: -f2); \
+	    failext=$$(echo $$stage | cut -d: -f3); \
+	    [ -d "$(DATA)/$$dir/$$v" ] || continue; \
+	    ok=$$(find $(DATA)/$$dir/$$v -name "*.$$okext"   2>/dev/null | wc -l); \
+	    fail=$$(find $(DATA)/$$dir/$$v -name "*.$$failext" 2>/dev/null | wc -l); \
+	    printf "%-10s %3d  %4d  %5d  %5d\n" "$$dir" "$$v" "$$ok" "$$fail" "$$total"; \
+	  done; \
+	  if [ -f "$(DATA)/proofs/$${v}_float.txt" ]; then \
+	    p=$$(grep -c PASS "$(DATA)/proofs/$${v}_float.txt" 2>/dev/null || echo 0); \
+	    f=$$(grep -c FAIL "$(DATA)/proofs/$${v}_float.txt" 2>/dev/null || echo 0); \
+	    printf "%-10s %3d  %4d  %5d  %5d\n" "prove" "$$v" "$$p" "$$f" "$$total"; \
+	  fi; \
 	done
 
 clean:
