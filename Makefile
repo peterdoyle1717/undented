@@ -313,18 +313,52 @@ prove: polish $(PROVER)
 	echo "=== $$n prove-failures (Plan A) — run 'make mma-residual' to close them ==="
 
 # ── mma-residual: MMA fallback to close the prove-failures ──────────────
+# Combines prove.c FAILs (rho>=thr / sigma_min<=0) AND polish.c .fail outputs
+# (length-Newton stalled at flopper) into a single residual batch.
 # Requires wolframscript on PATH. Run AFTER `make prove`.
 
+WOLFRAMSCRIPT ?= $(shell command -v wolframscript 2>/dev/null \
+                    || ls /Applications/WolframScript.app/Contents/MacOS/wolframscript 2>/dev/null \
+                    || echo)
+
 mma-residual:
-	@if ! command -v wolframscript >/dev/null 2>&1; then \
-	  echo "wolframscript not on PATH — needed for mma-residual"; exit 1; fi
-	@n=$$(wc -l < $(DATA)/proofs/failures.txt 2>/dev/null || echo 0); \
+	@if [ -z "$(WOLFRAMSCRIPT)" ]; then \
+	  echo "wolframscript not found — set WOLFRAMSCRIPT=/path/to/wolframscript"; exit 1; fi
+	@mkdir -p $(DATA)/residual
+	@: > $(DATA)/residual/listfile.txt
+	@for v in $$(seq 4 $(VMAX)); do \
+	  proveFail=$(DATA)/proofs/$${v}_float.txt; \
+	  if [ -f "$$proveFail" ]; then \
+	    grep FAIL "$$proveFail" 2>/dev/null \
+	      | awk -v v=$$v '{print v" "$$1" 0"}' \
+	      >> $(DATA)/residual/listfile.txt; \
+	  fi; \
+	  polishFails=$$(find $(DATA)/polish/$$v -name '*.fail' 2>/dev/null); \
+	  if [ -n "$$polishFails" ]; then \
+	    for f in $$polishFails; do \
+	      n=$$(basename "$$f" .fail); \
+	      preapproved=preapproved/data/$$v.txt; \
+	      if [ -f "$$preapproved" ] && grep -qx "$$n" "$$preapproved"; then \
+	        continue; \
+	      fi; \
+	      echo "$$v $$n 0" >> $(DATA)/residual/listfile.txt; \
+	    done; \
+	  fi; \
+	done
+	@n=$$(wc -l < $(DATA)/residual/listfile.txt | tr -d ' '); \
 	if [ "$$n" -eq 0 ]; then \
 	  echo "no failures to close"; exit 0; \
 	fi; \
-	echo "closing $$n Plan-A failures with MMA residual batch..."; \
-	wolframscript -f mma/prove_residual_batch.wls $(DATA)/proofs/failures.txt \
-	  | tee $(DATA)/proofs/mma_residual.log
+	echo "closing $$n residual nets (prove FAILs + polish .fail) with MMA..."; \
+	$(WOLFRAMSCRIPT) -f mma/prove_residual_batch.wls \
+	  $(DATA)/residual/listfile.txt $(DATA)/polish \
+	  | tee $(DATA)/residual/mma_residual.log
+	@cnt=$$(grep -cE '^[0-9]+,.*,(planA|planB),.*,PASS' $(DATA)/residual/mma_residual.log 2>/dev/null || echo 0); \
+	tot=$$(grep -cE '^[0-9]+,' $(DATA)/residual/mma_residual.log 2>/dev/null || echo 0); \
+	echo ""; \
+	echo "=== mma-residual: $$cnt/$$tot PASS ==="; \
+	grep -E '^[0-9]+,.*,FAIL' $(DATA)/residual/mma_residual.log 2>/dev/null \
+	  | head -10 || true
 
 # ── check ────────────────────────────────────────────────────────────────
 

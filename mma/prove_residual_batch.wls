@@ -202,8 +202,10 @@ planAat[verts_, faces_, prec_] := Module[{v2, res},
   res = neoProve[v2, faces];
   res];
 
-tryNet[v_, clers_, dent_] := Module[{path, verts, faces, r},
+tryNet[v_, clers_, dent_] := Module[{path, pathFail, verts, faces, r},
   path = FileNameJoin[{objDir, ToString[v], clers <> ".obj"}];
+  pathFail = FileNameJoin[{objDir, ToString[v], clers <> ".fail"}];
+  If[!FileExistsQ[path] && FileExistsQ[pathFail], path = pathFail];
   If[!FileExistsQ[path], Return[{"MISSING", "", "", "", ""}]];
   {verts, faces} = neoReadObj[path];
   (* Plan A first at escalating precision. Most "floppers" here have
