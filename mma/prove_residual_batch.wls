@@ -27,41 +27,14 @@ objDir = args[[2]];
 lines = Import[listFile, "Lines"];
 Print["v,clers,dent,method,prec,status,note"];
 
-(* Inline Plan B bigface (auto-flat, one plane per flat component).
-   Polishes with neoEucRefine at target prec FIRST so flat vertices show
-   their true magnitude (~10^-prec) rather than the input's double-prec
-   noise floor. *)
-runPlanB[vertsIn_, faces_, prec_] := Module[
-  {verts, nv, em, nbrs, cyclicLink, vertexTurn, flatV, edges, em0,
+(* Bigface construction + proof given a specific flatV. Called by runPlanB. *)
+tryBigfaceWithFlatV[vertsIn_, faces_, flatV_, prec_, nv_, nbrs_, edges_] := Module[
+  {verts = vertsIn,
    flatEdges, flatGraph, comps, allCoplan = {}, allDrops = {}, droppedSpokes,
    keptEdges, nE, nC, nEqAug, Jaug, gaugeCols, freeCols, Jfree, svals,
    sigmaMin, sqrtN, thr, disc, lhs, rhs, adj, minSq, cd, edgeResid,
-   coplanResid, rVec, rho, flatThresh, bad = False},
-  $neoPrec = prec;
-  verts = neoEucRefine[vertsIn, faces];
-  nv = Length[verts];
-  edges = Union[Flatten[(Sort /@ Partition[#, 2, 1, 1]) & /@ faces, 1]];
-  em0 = <||>;
-  nbrs = Table[{}, {nv}];
-  Do[With[{a = f[[1]], b = f[[2]], c = f[[3]]},
-    em0[{a, b}] = c; em0[{b, c}] = a; em0[{c, a}] = b;
-    nbrs[[a]] = Union[nbrs[[a]], {b, c}];
-    nbrs[[b]] = Union[nbrs[[b]], {a, c}];
-    nbrs[[c]] = Union[nbrs[[c]], {a, b}]], {f, faces}];
-  cyclicLink[v_] := Module[{start, ring, cur, nxt},
-    start = First[nbrs[[v]]]; ring = {start}; cur = start;
-    While[True, nxt = Lookup[em0, Key[{v, cur}], Missing[]];
-      If[MissingQ[nxt] || nxt === start, Break[]];
-      AppendTo[ring, nxt]; cur = nxt]; ring];
-  vertexTurn[v_] := Module[{link = cyclicLink[v], k, dirs, t = 0, dA, dB, dC, num, den},
-    k = Length[link];
-    dirs = Table[Module[{d = verts[[link[[i]]]] - verts[[v]]}, d/Norm[d]], {i, k}];
-    Do[dA = dirs[[Mod[i - 2, k] + 1]]; dB = dirs[[i]]; dC = dirs[[Mod[i, k] + 1]];
-       num = dB . Cross[dA, dC]; den = (dA . dB)(dB . dC) - (dA . dC);
-       t += ArcTan[den, num], {i, k}]; t];
-  flatThresh = 10^(-Floor[2 prec/5]);
-  flatV = Select[Range[nv], Length[nbrs[[#]]] == 6 && Abs[vertexTurn[#]] < flatThresh &];
-  If[flatV === {}, Return[<|"status" -> "NO_FLAT"|>]];
+   coplanResid, rVec, rho, bad = False,
+   buildResid, buildJaug, target, iter, maxIter, dxFree, prevRho},
   flatEdges = Select[edges, MemberQ[flatV, #[[1]]] && MemberQ[flatV, #[[2]]] &];
   flatGraph = Graph[flatV, UndirectedEdge @@@ flatEdges];
   comps = ConnectedComponents[flatGraph];
@@ -103,28 +76,48 @@ runPlanB[vertsIn_, faces_, prec_] := Module[
   droppedSpokes = Union[allDrops];
   keptEdges = Complement[edges, droppedSpokes];
   nE = Length[keptEdges]; nC = Length[allCoplan]; nEqAug = nE + nC;
-  edgeResid = Table[With[{i = e[[1]], j = e[[2]]},
-    (verts[[i]] - verts[[j]]).(verts[[i]] - verts[[j]]) - 1], {e, keptEdges}];
-  coplanResid = Table[With[{a1 = t[[1]], a2 = t[[2]], a3 = t[[3]], o = t[[4]]},
-    Det[{verts[[o]] - verts[[a1]], verts[[a2]] - verts[[a1]],
-         verts[[a3]] - verts[[a1]]}]], {t, allCoplan}];
-  rVec = Join[edgeResid, coplanResid]; rho = Sqrt[Total[rVec^2]];
-  Jaug = ConstantArray[0, {nEqAug, 3 nv}];
-  Do[With[{i = keptEdges[[k, 1]], j = keptEdges[[k, 2]],
-           d = verts[[keptEdges[[k, 1]]]] - verts[[keptEdges[[k, 2]]]]},
-      Jaug[[k, 3 (i - 1) + 1 ;; 3 i]] = 2 d;
-      Jaug[[k, 3 (j - 1) + 1 ;; 3 j]] = -2 d], {k, nE}];
-  Do[With[{t = allCoplan[[k]]},
-      With[{a1 = t[[1]], a2 = t[[2]], a3 = t[[3]], o = t[[4]]},
-        With[{u = verts[[o]] - verts[[a1]],
-              vv = verts[[a2]] - verts[[a1]], w = verts[[a3]] - verts[[a1]]},
-          With[{go = Cross[vv, w], ga2 = Cross[w, u], ga3 = Cross[u, vv]},
-            Jaug[[nE + k, 3 (o - 1) + 1 ;; 3 o]] = go;
-            Jaug[[nE + k, 3 (a2 - 1) + 1 ;; 3 a2]] = ga2;
-            Jaug[[nE + k, 3 (a3 - 1) + 1 ;; 3 a3]] = ga3;
-            Jaug[[nE + k, 3 (a1 - 1) + 1 ;; 3 a1]] = -(go + ga2 + ga3)]]]], {k, nC}];
   gaugeCols = {1, 2, 3, 5, 6, 9};
   freeCols = Complement[Range[3 nv], gaugeCols];
+  buildResid[v_] := Module[{eR, cR},
+    eR = Table[With[{i = e[[1]], j = e[[2]]},
+      (v[[i]] - v[[j]]).(v[[i]] - v[[j]]) - 1], {e, keptEdges}];
+    cR = Table[With[{a1 = t[[1]], a2 = t[[2]], a3 = t[[3]], o = t[[4]]},
+      Det[{v[[o]] - v[[a1]], v[[a2]] - v[[a1]], v[[a3]] - v[[a1]]}]], {t, allCoplan}];
+    Join[eR, cR]];
+  buildJaug[v_] := Module[{J = ConstantArray[0, {nEqAug, 3 nv}]},
+    Do[With[{i = keptEdges[[k, 1]], j = keptEdges[[k, 2]],
+             d = v[[keptEdges[[k, 1]]]] - v[[keptEdges[[k, 2]]]]},
+        J[[k, 3 (i - 1) + 1 ;; 3 i]] = 2 d;
+        J[[k, 3 (j - 1) + 1 ;; 3 j]] = -2 d], {k, nE}];
+    Do[With[{t = allCoplan[[k]]},
+        With[{a1 = t[[1]], a2 = t[[2]], a3 = t[[3]], o = t[[4]]},
+          With[{u = v[[o]] - v[[a1]], vv = v[[a2]] - v[[a1]], w = v[[a3]] - v[[a1]]},
+            With[{go = Cross[vv, w], ga2 = Cross[w, u], ga3 = Cross[u, vv]},
+              J[[nE + k, 3 (o - 1) + 1 ;; 3 o]] = go;
+              J[[nE + k, 3 (a2 - 1) + 1 ;; 3 a2]] = ga2;
+              J[[nE + k, 3 (a3 - 1) + 1 ;; 3 a3]] = ga3;
+              J[[nE + k, 3 (a1 - 1) + 1 ;; 3 a1]] = -(go + ga2 + ga3)]]]], {k, nC}];
+    J];
+  (* Augmented Newton iteration: from possibly-floppy length-fixed-point,
+     converge to true zero of length+coplanarity system. *)
+  verts = SetPrecision[verts, prec];
+  target = 10^(-(2 prec)/3);
+  maxIter = 50; prevRho = Infinity;
+  Do[
+    rVec = buildResid[verts];
+    rho = Sqrt[Total[rVec^2]];
+    If[rho < target, Break[]];
+    If[rho > 0.5 prevRho && iter > 5, Break[]];  (* not converging *)
+    prevRho = rho;
+    Jaug = buildJaug[verts];
+    Jfree = Jaug[[All, freeCols]];
+    dxFree = Quiet[LeastSquares[Jfree, -rVec]];
+    Do[Module[{col = freeCols[[k]], vi, ax},
+        vi = Quotient[col + 2, 3]; ax = Mod[col - 1, 3] + 1;
+        verts[[vi, ax]] = verts[[vi, ax]] + dxFree[[k]]], {k, Length[freeCols]}],
+    {iter, 1, maxIter}];
+  rVec = buildResid[verts]; rho = Sqrt[Total[rVec^2]];
+  Jaug = buildJaug[verts];
   Jfree = SetPrecision[Jaug[[All, freeCols]], prec];
   svals = SingularValueList[Jfree];
   sigmaMin = Min[svals];
@@ -151,6 +144,58 @@ runPlanB[vertsIn_, faces_, prec_] := Module[
   <|"status" -> "B_PASS", "sigmaMin" -> sigmaMin, "rho" -> rho,
     "nFlat" -> Length[flatV], "nComp" -> Length[comps]|>];
 
+(* Plan B with ADAPTIVE flat-threshold.
+   Instead of a fixed threshold, sort all deg-6 vertices by |turn| and try
+   successive prefixes as the flat set. First prefix whose bigface proof
+   succeeds wins. Gives up only after trying every plausible flat-count. *)
+runPlanB[vertsIn_, faces_, prec_] := Module[
+  {verts, nv, em0, nbrs, edges, cyclicLink, vertexTurn,
+   deg6, deg6Turns, sortedDeg6, result, flatV, kMax, lastFail},
+  $neoPrec = prec;
+  verts = neoEucRefine[vertsIn, faces];
+  nv = Length[verts];
+  edges = Union[Flatten[(Sort /@ Partition[#, 2, 1, 1]) & /@ faces, 1]];
+  em0 = <||>;
+  nbrs = Table[{}, {nv}];
+  Do[With[{a = f[[1]], b = f[[2]], c = f[[3]]},
+    em0[{a, b}] = c; em0[{b, c}] = a; em0[{c, a}] = b;
+    nbrs[[a]] = Union[nbrs[[a]], {b, c}];
+    nbrs[[b]] = Union[nbrs[[b]], {a, c}];
+    nbrs[[c]] = Union[nbrs[[c]], {a, b}]], {f, faces}];
+  cyclicLink[v_] := Module[{start, ring, cur, nxt},
+    start = First[nbrs[[v]]]; ring = {start}; cur = start;
+    While[True, nxt = Lookup[em0, Key[{v, cur}], Missing[]];
+      If[MissingQ[nxt] || nxt === start, Break[]];
+      AppendTo[ring, nxt]; cur = nxt]; ring];
+  vertexTurn[v_] := Module[{link = cyclicLink[v], k, dirs, t = 0, dA, dB, dC, num, den},
+    k = Length[link];
+    dirs = Table[Module[{d = verts[[link[[i]]]] - verts[[v]]}, d/Norm[d]], {i, k}];
+    Do[dA = dirs[[Mod[i - 2, k] + 1]]; dB = dirs[[i]]; dC = dirs[[Mod[i, k] + 1]];
+       num = dB . Cross[dA, dC]; den = (dA . dB)(dB . dC) - (dA . dC);
+       t += ArcTan[den, num], {i, k}]; t];
+  deg6 = Select[Range[nv], Length[nbrs[[#]]] == 6 &];
+  If[deg6 === {},
+    Return[<|"status" -> "B_FAIL", "reason" -> "no deg-6 vertices"|>]];
+  deg6Turns = AssociationThread[deg6 -> (Abs[vertexTurn[#]] & /@ deg6)];
+  sortedDeg6 = SortBy[deg6, deg6Turns[#] &];
+  (* Only include candidates with |turn| < 1e-3 — SPEC's flopper boundary.
+     If nothing is even that flat, genuinely no Plan B flats. *)
+  sortedDeg6 = Select[sortedDeg6, deg6Turns[#] < 1/1000 &];
+  If[sortedDeg6 === {},
+    Return[<|"status" -> "B_FAIL", "reason" -> "no deg-6 flats < 1e-3"|>]];
+  kMax = Min[Length[sortedDeg6], 20];
+  lastFail = <|"status" -> "B_FAIL", "reason" -> "no flat-count worked"|>;
+  Catch[
+    Do[
+      flatV = Take[sortedDeg6, k];
+      result = tryBigfaceWithFlatV[verts, faces, flatV, prec, nv, nbrs, edges];
+      If[result["status"] === "B_PASS",
+        Throw[Join[result, <|"nFlatTried" -> k|>]]];
+      lastFail = Join[result, <|"nFlatTried" -> k|>],
+      {k, 1, kMax}];
+    lastFail]];
+
+(* --- preserve the old signature by short-circuiting — body now empty --- *)
 planAat[verts_, faces_, prec_] := Module[{v2, res},
   $neoPrec = prec;
   v2 = neoEucRefine[verts, faces];
@@ -171,8 +216,8 @@ tryNet[v_, clers_, dent_] := Module[{path, verts, faces, r},
   Do[r = runPlanB[verts, faces, p];
      If[r["status"] === "B_PASS",
        Return[{"planB", p, "PASS", "", ""}, Module]],
-    {p, {50, 100, 200, 500}}];
-  {"none", 500, "FAIL", ToString[r["status"]],
+    {p, {50, 100, 200, 500, 1000, 2000}}];
+  {"none", 2000, "FAIL", ToString[r["status"]],
    ToString[Lookup[r, "reason", ""]]}];
 
 count = 0;
