@@ -1,9 +1,14 @@
-/* euclidsolve.c — UHS last frame → Euclidean OBJ
+/* euclidsolve.c — UHS last frame → Euclidean OBJ (with gating)
  *
  * Reads binary .uhs files (from horodump), takes the last frame,
  * maps UHS→Klein, scales by 1/(2ρ) for Euclidean initial guess,
  * optionally polishes with Newton (residual backtracking, no dent gating).
- * Always writes .obj — the prover decides if it passes.
+ *
+ * Two stages of the pipeline use this same binary:
+ *   pusheuclid    (no -polish): test embedded AND undented.
+ *                 PASS → write NAME.obj. FAIL → write NAME.fail (same data).
+ *   polisheuclid  (-polish):    Newton-polish, then test embedded only.
+ *                 PASS → NAME.obj. FAIL (Newton-fail OR not embedded) → NAME.fail.
  *
  * Gauge: v1=(0,0,½), v2=(0,0,-½), v3=(√3/2,0,0)
  *   applied by pinning v1,v2,v3 to gauge positions.
@@ -97,10 +102,12 @@ static int lu_solve_n(int n){
         double inv=1.0/NJmat[col][col];for(int row=col+1;row<n;row++){double fac=NJmat[row][col]*inv;for(int k=col;k<n;k++)NJmat[row][k]-=fac*NJmat[col][k];NFvec[row]-=fac*NFvec[col];}}
     for(int i=n-1;i>=0;i--){double s=NFvec[i];for(int j=i+1;j<n;j++)s-=NJmat[i][j]*NFvec[j];NFvec[i]=s/NJmat[i][i];}return 0;}
 
-static void euclid_polish(void){
+/* Newton-polish edge lengths to 1. Returns final max|edge_len^2 - 1|. */
+static double euclid_polish(void){
     int n=3*(NV-3);
+    double res=1e30;
     for(int iter=0;iter<50;iter++){
-        double res=0;
+        res=0;
         for(int k=0;k<n_edges;k++){int i=eu[k],j=ev[k];
             double dx=EX(i)-EX(j),dy=EY(i)-EY(j),dz=EZ(i)-EZ(j);
             NFvec[k]=dx*dx+dy*dy+dz*dz-1.0;
@@ -128,6 +135,80 @@ static void euclid_polish(void){
             e_xvec[3*(v-4)+1]+=step*NFvec[3*(v-4)+1];
             e_xvec[3*(v-4)+2]+=step*NFvec[3*(v-4)+2];}
     }
+    return res;
+}
+
+/* ── post-solve checks ─────────────────────────────────────────────────── */
+
+/* Min link turning across all vertices. Positive = undented at every vertex. */
+static double check_min_turn(double pos[MAXV+1][3]){
+    double min_turn=1e30;
+    for(int v=1;v<=NV;v++){
+        if(NNBR[v]<3) continue;
+        int link[MAXRING],k=0,start=NBR[v][0],cur=start;
+        link[k++]=start;
+        while(k<NNBR[v]){int nxt=EM[v][cur];if(!nxt||nxt==start)break;link[k++]=nxt;cur=nxt;}
+        if(k<3) continue;
+        double dirs[MAXRING][3];
+        for(int i=0;i<k;i++){
+            double dx=pos[link[i]][0]-pos[v][0];
+            double dy=pos[link[i]][1]-pos[v][1];
+            double dz=pos[link[i]][2]-pos[v][2];
+            double n=sqrt(dx*dx+dy*dy+dz*dz);
+            dirs[i][0]=dx/n;dirs[i][1]=dy/n;dirs[i][2]=dz/n;
+        }
+        double turn=0;
+        for(int i=0;i<k;i++){
+            int im=(i+k-1)%k,ip=(i+1)%k;
+            double *dA=dirs[im],*dB=dirs[i],*dC=dirs[ip];
+            double cAC[3]={dA[1]*dC[2]-dA[2]*dC[1],dA[2]*dC[0]-dA[0]*dC[2],dA[0]*dC[1]-dA[1]*dC[0]};
+            double num=dB[0]*cAC[0]+dB[1]*cAC[1]+dB[2]*cAC[2];
+            double dAB=dA[0]*dB[0]+dA[1]*dB[1]+dA[2]*dB[2];
+            double dBC=dB[0]*dC[0]+dB[1]*dC[1]+dB[2]*dC[2];
+            double dAC=dA[0]*dC[0]+dA[1]*dC[1]+dA[2]*dC[2];
+            double den=dAB*dBC-dAC;
+            turn+=atan2(num,den);
+        }
+        if(turn<min_turn) min_turn=turn;
+    }
+    return min_turn;
+}
+
+/* Tri-tri intersection: 1 if embedded (no non-adjacent intersect), 0 else. */
+static int seg_tri_eu(const double P0[3],const double P1[3],
+                      const double V0[3],const double V1[3],const double V2[3]){
+    double dir[3]={P1[0]-P0[0],P1[1]-P0[1],P1[2]-P0[2]};
+    double e1[3]={V1[0]-V0[0],V1[1]-V0[1],V1[2]-V0[2]};
+    double e2[3]={V2[0]-V0[0],V2[1]-V0[1],V2[2]-V0[2]};
+    double h[3]={dir[1]*e2[2]-dir[2]*e2[1],dir[2]*e2[0]-dir[0]*e2[2],dir[0]*e2[1]-dir[1]*e2[0]};
+    double a=e1[0]*h[0]+e1[1]*h[1]+e1[2]*h[2];
+    if(fabs(a)<1e-15) return 0;
+    double f=1.0/a;
+    double s[3]={P0[0]-V0[0],P0[1]-V0[1],P0[2]-V0[2]};
+    double u=f*(s[0]*h[0]+s[1]*h[1]+s[2]*h[2]);
+    if(u<0.0||u>1.0) return 0;
+    double q[3]={s[1]*e1[2]-s[2]*e1[1],s[2]*e1[0]-s[0]*e1[2],s[0]*e1[1]-s[1]*e1[0]};
+    double v=f*(dir[0]*q[0]+dir[1]*q[1]+dir[2]*q[2]);
+    if(v<0.0||u+v>1.0) return 0;
+    double t=f*(e2[0]*q[0]+e2[1]*q[1]+e2[2]*q[2]);
+    return (t>1e-10 && t<1.0-1e-10);
+}
+
+static int check_embedded(double pos[MAXV+1][3]){
+    for(int i=0;i<NF;i++){
+        int ai=F[i].a,bi=F[i].b,ci=F[i].c;
+        for(int j=i+1;j<NF;j++){
+            int aj=F[j].a,bj=F[j].b,cj=F[j].c;
+            if(ai==aj||ai==bj||ai==cj||bi==aj||bi==bj||bi==cj||
+               ci==aj||ci==bj||ci==cj) continue;
+            double *A=pos[ai],*B=pos[bi],*C=pos[ci];
+            double *D=pos[aj],*E=pos[bj],*G=pos[cj];
+            if(seg_tri_eu(A,B,D,E,G)||seg_tri_eu(B,C,D,E,G)||seg_tri_eu(A,C,D,E,G)||
+               seg_tri_eu(D,E,A,B,C)||seg_tri_eu(E,G,A,B,C)||seg_tri_eu(D,G,A,B,C))
+                return 0;
+        }
+    }
+    return 1;
 }
 
 /* ── main ────────────────────────────────────────────────────────────────── */
@@ -193,39 +274,47 @@ int main(int argc, char **argv){
             pos[v][2]=(r2-1)/d*inv2rho;
         }
 
-        /* write unpolished OBJ */
+        int pass; const char *reason="ok";
         if(!do_polish){
-            snprintf(path,sizeof(path),"%s/%s.obj",outdir,line);
-            fp=fopen(path,"w");
-            if(fp){
-                for(int v=1;v<=NV;v++)
-                    fprintf(fp,"v %.17g %.17g %.17g\n",pos[v][0],pos[v][1],pos[v][2]);
-                for(int i=0;i<NF;i++)
-                    fprintf(fp,"f %d %d %d\n",F[i].a,F[i].b,F[i].c);
-                fclose(fp);
-            }
+            /* pusheuclid: embedded AND undented. */
+            int emb=check_embedded(pos);
+            double mt=check_min_turn(pos);
+            pass = emb && (mt>0);
+            if(!emb) reason="not-embedded";
+            else if(!(mt>0)) reason="dented";
         } else {
-            /* polish: pin gauge, Newton on v4+ */
+            /* polisheuclid: Newton-polish, then test embedded only. */
             for(int v=4;v<=NV;v++){
                 e_xvec[3*(v-4)  ]=pos[v][0];
                 e_xvec[3*(v-4)+1]=pos[v][1];
                 e_xvec[3*(v-4)+2]=pos[v][2];
             }
-            euclid_polish();
-            snprintf(path,sizeof(path),"%s/%s.obj",outdir,line);
-            fp=fopen(path,"w");
-            if(fp){
-                fprintf(fp,"v %.17g %.17g %.17g\n",EC[1][0],EC[1][1],EC[1][2]);
-                fprintf(fp,"v %.17g %.17g %.17g\n",EC[2][0],EC[2][1],EC[2][2]);
-                fprintf(fp,"v %.17g %.17g %.17g\n",EC[3][0],EC[3][1],EC[3][2]);
-                for(int v=4;v<=NV;v++)
-                    fprintf(fp,"v %.17g %.17g %.17g\n",e_xvec[3*(v-4)],e_xvec[3*(v-4)+1],e_xvec[3*(v-4)+2]);
-                for(int i=0;i<NF;i++)
-                    fprintf(fp,"f %d %d %d\n",F[i].a,F[i].b,F[i].c);
-                fclose(fp);
+            double res=euclid_polish();
+            for(int v=1;v<=3;v++){pos[v][0]=EC[v][0];pos[v][1]=EC[v][1];pos[v][2]=EC[v][2];}
+            for(int v=4;v<=NV;v++){
+                pos[v][0]=e_xvec[3*(v-4)];
+                pos[v][1]=e_xvec[3*(v-4)+1];
+                pos[v][2]=e_xvec[3*(v-4)+2];
             }
+            int solver_ok = (res<1e-10);
+            int emb = check_embedded(pos);
+            pass = solver_ok && emb;
+            if(!solver_ok) reason="solver-fail";
+            else if(!emb) reason="not-embedded";
         }
-        ok_count++;
+
+        const char *ext = pass ? "obj" : "fail";
+        snprintf(path,sizeof(path),"%s/%s.%s",outdir,line,ext);
+        fp=fopen(path,"w");
+        if(fp){
+            for(int v=1;v<=NV;v++)
+                fprintf(fp,"v %.17g %.17g %.17g\n",pos[v][0],pos[v][1],pos[v][2]);
+            for(int i=0;i<NF;i++)
+                fprintf(fp,"f %d %d %d\n",F[i].a,F[i].b,F[i].c);
+            fclose(fp);
+        }
+        if(pass) ok_count++; else fail_count++;
+        (void)reason;
 
         build_clear();
         nets++;
