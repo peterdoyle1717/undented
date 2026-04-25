@@ -24,6 +24,9 @@ If[Length[args] < 2,
 listFile = args[[1]];
 objDir = args[[2]];
 
+mmaTimeout = ToExpression[Environment["MMA_TIMEOUT"]];
+If[!NumberQ[mmaTimeout] || mmaTimeout <= 0, mmaTimeout = 600];
+
 lines = Import[listFile, "Lines"];
 Print["v,clers,dent,method,prec,status,note"];
 
@@ -228,7 +231,7 @@ Do[Module[{parts, v, clers, dent, result},
   If[Length[parts] < 3, Continue[]];
   v = ToExpression[parts[[1]]]; clers = parts[[2]];
   dent = ToExpression[StringReplace[parts[[3]], {"e" -> "*^", "E" -> "*^"}]];
-  result = TimeConstrained[tryNet[v, clers, dent], 180, {"timeout", "", "", "", ""}];
+  result = TimeConstrained[tryNet[v, clers, dent], mmaTimeout, {"timeout", "", "", "", ""}];
   Print[v, ",", clers, ",", ScientificForm[N[dent, 4], 3], ",",
     result[[1]], ",", result[[2]], ",", result[[3]], ",",
     result[[4]], ",", result[[5]]];

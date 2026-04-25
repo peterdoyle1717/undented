@@ -1,8 +1,7 @@
 # undented — prime neoplatonic solids: enumerate, solve, prove
 #
 # Pipeline (see SPEC.md):  prime → horodump2 → pusheuclid → polish → prove
-#                                              ( + preapproved shortcut
-#                                              + mma-residual fallback )
+#                                              + mma-residual fallback
 #
 # Common targets:
 #   make seeds      VMAX=30   generate seed files through VMAX
@@ -11,9 +10,12 @@
 #   make pusheuclid VMAX=30   Klein-expand last UHS frame → Euclidean OBJ
 #   make polish     VMAX=30   edge-length Newton (+ Plan B bigface fallback)
 #   make prove      VMAX=30   Plan A existence proofs (LAPACK)
-#   make all        VMAX=30   primes → horodump2 → pusheuclid → polish → prove
+#   make mma-residual         MMA fallback for cases prove + polish couldn't close
+#   make all        VMAX=30   prime → horodump2 → pusheuclid → polish → prove → mma-residual
 #   make status               count PASS/FAIL per stage
 #   make clean                remove bin/
+#
+# Knobs:  JOBS=N (parallel jobs), MMA_TIMEOUT=N (seconds per net, default 600)
 
 VMAX  ?= 30
 V     ?= 12
@@ -44,7 +46,7 @@ CHECK_ALL    = $(BIN)/check_all
 
 .PHONY: all tools checkers seed-one seeds primes horodump2 pusheuclid polish prove check status clean mma-residual
 
-all: primes horodump2 pusheuclid polish prove
+all: primes horodump2 pusheuclid polish prove mma-residual
 
 # ── tools ────────────────────────────────────────────────────────────────
 
@@ -267,7 +269,7 @@ polish: pusheuclid $(POLISH)
 	  echo "  polish v=$$v: ok=$$ok fail=$$fail"; \
 	done
 
-# ── prove (Plan A, C prover, with preapproved shortcut) ──────────────────
+# ── prove (Plan A C prover; runs on every polished .obj) ────────────────
 
 prove: polish $(PROVER)
 	@mkdir -p $(DATA)/proofs $(RUN)/logs $(RUN)/tmp
@@ -277,21 +279,8 @@ prove: polish $(PROVER)
 	  objdir=$(DATA)/polish/$$v; \
 	  n=$$(find "$$objdir" -name '*.obj' 2>/dev/null | wc -l); \
 	  [ "$$n" -eq 0 ] && continue; \
-	  preapproved=preapproved/data/$$v.txt; \
-	  if [ -f "$$preapproved" ]; then \
-	    papp=$$(wc -l < "$$preapproved" | tr -d ' '); \
-	  else \
-	    papp=0; \
-	  fi; \
-	  echo "prove v=$$v ($$n nets, $$papp preapproved skipped)"; \
-	  if [ -f "$$preapproved" ]; then \
-	    find "$$objdir" -name '*.obj' | \
-	      awk -v pa="$$preapproved" 'BEGIN{while((getline l < pa)>0)p[l]=1} \
-	                                 {n=$$0; sub(/.*\//,"",n); sub(/\.obj$$/,"",n); if(!(n in p)) print}' \
-	      > $(RUN)/tmp/prove_$${v}_list.txt; \
-	  else \
-	    find "$$objdir" -name '*.obj' > $(RUN)/tmp/prove_$${v}_list.txt; \
-	  fi; \
+	  echo "prove v=$$v ($$n nets)"; \
+	  find "$$objdir" -name '*.obj' > $(RUN)/tmp/prove_$${v}_list.txt; \
 	  if command -v parallel >/dev/null 2>&1; then \
 	    split -n l/$(JOBS) $(RUN)/tmp/prove_$${v}_list.txt $(RUN)/tmp/pchunk_$${v}_; \
 	    nice -n $(NICE) parallel -j $(JOBS) \
@@ -305,7 +294,7 @@ prove: polish $(PROVER)
 	  rm -f $(RUN)/tmp/prove_$${v}_list.txt; \
 	  pass=$$(grep -c PASS $(DATA)/proofs/$${v}_float.txt 2>/dev/null || echo 0); \
 	  fail=$$(grep -c FAIL $(DATA)/proofs/$${v}_float.txt 2>/dev/null || echo 0); \
-	  echo "  pass=$$pass fail=$$fail (plus $$papp preapproved)"; \
+	  echo "  pass=$$pass fail=$$fail"; \
 	  grep FAIL $(DATA)/proofs/$${v}_float.txt >> $(DATA)/proofs/failures.txt 2>/dev/null || true; \
 	done
 	@n=$$(wc -l < $(DATA)/proofs/failures.txt); \
@@ -315,11 +304,15 @@ prove: polish $(PROVER)
 # ── mma-residual: MMA fallback to close the prove-failures ──────────────
 # Combines prove.c FAILs (rho>=thr / sigma_min<=0) AND polish.c .fail outputs
 # (length-Newton stalled at flopper) into a single residual batch.
-# Requires wolframscript on PATH. Run AFTER `make prove`.
+# Requires wolframscript. Auto-detected at common Mac/Linux paths.
+# Override timeout (per-net) via MMA_TIMEOUT (seconds, default 600).
 
 WOLFRAMSCRIPT ?= $(shell command -v wolframscript 2>/dev/null \
                     || ls /Applications/WolframScript.app/Contents/MacOS/wolframscript 2>/dev/null \
+                    || ls /usr/local/Wolfram/Mathematica/*/Executables/wolframscript 2>/dev/null | tail -1 \
+                    || ls /usr/local/Wolfram/WolframEngine/*/Executables/wolframscript 2>/dev/null | tail -1 \
                     || echo)
+MMA_TIMEOUT ?= 600
 
 mma-residual:
 	@if [ -z "$(WOLFRAMSCRIPT)" ]; then \
@@ -337,10 +330,6 @@ mma-residual:
 	  if [ -n "$$polishFails" ]; then \
 	    for f in $$polishFails; do \
 	      n=$$(basename "$$f" .fail); \
-	      preapproved=preapproved/data/$$v.txt; \
-	      if [ -f "$$preapproved" ] && grep -qx "$$n" "$$preapproved"; then \
-	        continue; \
-	      fi; \
 	      echo "$$v $$n 0" >> $(DATA)/residual/listfile.txt; \
 	    done; \
 	  fi; \
@@ -349,16 +338,16 @@ mma-residual:
 	if [ "$$n" -eq 0 ]; then \
 	  echo "no failures to close"; exit 0; \
 	fi; \
-	echo "closing $$n residual nets (prove FAILs + polish .fail) with MMA..."; \
-	$(WOLFRAMSCRIPT) -f mma/prove_residual_batch.wls \
+	echo "closing $$n residual nets (prove FAILs + polish .fail) with MMA (timeout=$(MMA_TIMEOUT)s/net)..."; \
+	MMA_TIMEOUT=$(MMA_TIMEOUT) $(WOLFRAMSCRIPT) -f mma/prove_residual_batch.wls \
 	  $(DATA)/residual/listfile.txt $(DATA)/polish \
 	  | tee $(DATA)/residual/mma_residual.log
 	@cnt=$$(grep -cE '^[0-9]+,.*,(planA|planB),.*,PASS' $(DATA)/residual/mma_residual.log 2>/dev/null || echo 0); \
 	tot=$$(grep -cE '^[0-9]+,' $(DATA)/residual/mma_residual.log 2>/dev/null || echo 0); \
 	echo ""; \
 	echo "=== mma-residual: $$cnt/$$tot PASS ==="; \
-	grep -E '^[0-9]+,.*,FAIL' $(DATA)/residual/mma_residual.log 2>/dev/null \
-	  | head -10 || true
+	grep -E '^[0-9]+,.*,FAIL|^[0-9]+,.*,timeout' $(DATA)/residual/mma_residual.log 2>/dev/null \
+	  | head -20 || true
 
 # ── check ────────────────────────────────────────────────────────────────
 
