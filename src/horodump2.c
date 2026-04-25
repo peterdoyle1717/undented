@@ -223,6 +223,13 @@ int main(int argc, char **argv){
             (void)dent_block;
         }
 
+        /* If dent-blocked but we already descended at least one step from
+         * rho_start, the last saved frame is a valid (undented) UHS solution.
+         * Save what we have — pusheuclid + polish can take it from rho=N/2^k
+         * to Euclidean. Only treat as a true failure if we never made any
+         * descent progress (e.g. couldn't even Newton-converge at rho_start). */
+        if(!ok && nframes >= 3) ok = 1;
+
         if(ok){
             char path[4096];
             snprintf(path,sizeof(path),"%s/%s.uhs",outdir,line);
