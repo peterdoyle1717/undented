@@ -83,8 +83,17 @@ def encode(poly, start=None):
 #   D:     phase 0 = push first child, phase 1 = push second, phase 2 = merge + emit
 #   E:     handled immediately (no children)
 
+_VALID = frozenset("EABCD")
+
+
 def decode(recipe, verify=False):
     n = len(recipe)
+    for i, c in enumerate(recipe):
+        if c not in _VALID:
+            raise ValueError(
+                f"invalid CLERS character {c!r} at position {i} "
+                f"(valid alphabet: {''.join(sorted(_VALID))})"
+            )
     parent = {}       # union-find, inline for speed
     triangles = []    # appended in order, reversed at end
 

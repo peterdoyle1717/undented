@@ -139,6 +139,14 @@ static int decode(const char *code) {
     int n = strlen(code);
     if (!n) return 0;
 
+    for (int i = 0; i < n; i++) {
+        char c = code[i];
+        if (c != 'E' && c != 'A' && c != 'B' && c != 'C' && c != 'D') {
+            fprintf(stderr, "clers decode: invalid character '%c' at position %d (alphabet: ABCDE)\n", c, i);
+            return 0;
+        }
+    }
+
     int maxv = n + 4;
     for (int i=0; i<=maxv; i++) UF[i]=i;
 
