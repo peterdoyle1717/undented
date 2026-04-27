@@ -83,19 +83,15 @@ def encode(poly, start=None):
 #   D:     phase 0 = push first child, phase 1 = push second, phase 2 = merge + emit
 #   E:     handled immediately (no children)
 
-_VALID = frozenset("EABCD")
-
-
 def decode(recipe, verify=False):
     n = len(recipe)
-    for i, c in enumerate(recipe):
-        if c not in _VALID:
-            raise ValueError(
-                f"invalid CLERS character {c!r} at position {i} "
-                f"(valid alphabet: {''.join(sorted(_VALID))})"
-            )
     parent = {}       # union-find, inline for speed
     triangles = []    # appended in order, reversed at end
+
+    def take(ptr):
+        if ptr >= n:
+            raise ValueError(f"clers decode: recipe truncated at position {ptr}")
+        return recipe[ptr], ptr + 1
 
     # inline union-find
     def find(x):
@@ -123,7 +119,7 @@ def decode(recipe, verify=False):
     v0, v1 = 1, 2
 
     # read first tile and push
-    tile = recipe[ptr]; ptr += 1
+    tile, ptr = take(ptr)
     V += 1; c0 = V
     stack.append((tile, v0, v1, c0, 0))
 
@@ -139,7 +135,7 @@ def decode(recipe, verify=False):
             if phase == 0:
                 # push child chew(c, b)
                 stack[-1] = (tile, a, b, c, 1)
-                t = recipe[ptr]; ptr += 1
+                t, ptr = take(ptr)
                 V += 1
                 stack.append((t, c, b, V, 0))
             else:
@@ -151,7 +147,7 @@ def decode(recipe, verify=False):
         elif tile == "B":
             if phase == 0:
                 stack[-1] = (tile, a, b, c, 1)
-                t = recipe[ptr]; ptr += 1
+                t, ptr = take(ptr)
                 V += 1
                 stack.append((t, a, c, V, 0))
             else:
@@ -163,7 +159,7 @@ def decode(recipe, verify=False):
         elif tile == "C":
             if phase == 0:
                 stack[-1] = (tile, a, b, c, 1)
-                t = recipe[ptr]; ptr += 1
+                t, ptr = take(ptr)
                 V += 1
                 stack.append((t, a, c, V, 0))
             else:
@@ -179,13 +175,13 @@ def decode(recipe, verify=False):
             if phase == 0:
                 # push first child chew(a, c)
                 stack[-1] = (tile, a, b, c, 1)
-                t = recipe[ptr]; ptr += 1
+                t, ptr = take(ptr)
                 V += 1
                 stack.append((t, a, c, V, 0))
             elif phase == 1:
                 # push second child chew(c, b)
                 stack[-1] = (tile, a, b, c, 2)
-                t = recipe[ptr]; ptr += 1
+                t, ptr = take(ptr)
                 V += 1
                 stack.append((t, c, b, V, 0))
             else:
@@ -196,8 +192,17 @@ def decode(recipe, verify=False):
                 dq.extend(dq2)
                 triangles.append((a, b, c))
 
-    assert ptr == n, f"leftover input at position {ptr}"
-    assert len(dq_stack) == 1
+        else:
+            raise ValueError(
+                f"clers decode: invalid character {tile!r} at position {ptr-1} (alphabet: ABCDE)"
+            )
+
+    if ptr != n:
+        raise ValueError(f"clers decode: {n - ptr} trailing characters after decode")
+    if len(dq_stack) != 1:
+        raise ValueError(
+            f"clers decode: {len(dq_stack)} subtrees on stack at end (expected 1)"
+        )
 
     # resolve identifications and relabel
     triangles.reverse()

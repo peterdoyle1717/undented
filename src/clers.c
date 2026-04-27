@@ -135,23 +135,27 @@ static Frame FSTK[MAXCODE];
 static Deque DSTK[MAXV];
 static Face  DTRIS[MAXF];
 
+/* Bounds-checked tile read; emits the truncation message and returns 0
+   from the enclosing function (decode) on premature end of input. */
+#define TAKE(var) do { \
+    if (ptr >= n) { \
+        fprintf(stderr, "clers decode: recipe truncated at position %d\n", ptr); \
+        return 0; \
+    } \
+    var = code[ptr++]; \
+} while (0)
+
 static int decode(const char *code) {
     int n = strlen(code);
     if (!n) return 0;
-
-    for (int i = 0; i < n; i++) {
-        char c = code[i];
-        if (c != 'E' && c != 'A' && c != 'B' && c != 'C' && c != 'D') {
-            fprintf(stderr, "clers decode: invalid character '%c' at position %d (alphabet: ABCDE)\n", c, i);
-            return 0;
-        }
-    }
 
     int maxv = n + 4;
     for (int i=0; i<=maxv; i++) UF[i]=i;
 
     int ptr=0, V=2, ntris=0, nstk=0, ndq=0;
-    char tile = code[ptr++]; V++;
+    char tile;
+    TAKE(tile);
+    V++;
     FSTK[nstk++] = (Frame){tile, 1, 2, V, 0};
 
     while (nstk > 0) {
@@ -167,32 +171,44 @@ static int decode(const char *code) {
             ndq++;
             DTRIS[ntris++]=(Face){a,b,c};
         } else if (t=='A') {
-            if (!ph) { f->phase=1; char nt=code[ptr++]; V++;
+            if (!ph) { f->phase=1; char nt; TAKE(nt); V++;
                        FSTK[nstk++]=(Frame){nt,c,b,V,0}; }
             else { nstk--; dq_push_front(&DSTK[ndq-1],a);
                    DTRIS[ntris++]=(Face){a,b,c}; }
         } else if (t=='B') {
-            if (!ph) { f->phase=1; char nt=code[ptr++]; V++;
+            if (!ph) { f->phase=1; char nt; TAKE(nt); V++;
                        FSTK[nstk++]=(Frame){nt,a,c,V,0}; }
             else { nstk--; dq_push_back(&DSTK[ndq-1],b);
                    DTRIS[ntris++]=(Face){a,b,c}; }
         } else if (t=='C') {
-            if (!ph) { f->phase=1; char nt=code[ptr++]; V++;
+            if (!ph) { f->phase=1; char nt; TAKE(nt); V++;
                        FSTK[nstk++]=(Frame){nt,a,c,V,0}; }
             else { nstk--; Deque *d=&DSTK[ndq-1];
                    dq_pop_back(d); int dd=dq_pop_back(d);
                    dq_push_back(d,b); uf_link(dd,b);
                    DTRIS[ntris++]=(Face){a,b,c}; }
-        } else { /* D */
-            if (ph==0)    { f->phase=1; char nt=code[ptr++]; V++;
+        } else if (t=='D') {
+            if (ph==0)    { f->phase=1; char nt; TAKE(nt); V++;
                             FSTK[nstk++]=(Frame){nt,a,c,V,0}; }
-            else if (ph==1){ f->phase=2; char nt=code[ptr++]; V++;
+            else if (ph==1){ f->phase=2; char nt; TAKE(nt); V++;
                             FSTK[nstk++]=(Frame){nt,c,b,V,0}; }
             else { nstk--; Deque *dq2=&DSTK[--ndq]; Deque *dq=&DSTK[ndq-1];
                    dq_pop_back(dq);
                    for (int i=dq2->h; i<dq2->t; i++) dq_push_back(dq,dq2->data[i]);
                    DTRIS[ntris++]=(Face){a,b,c}; }
+        } else {
+            fprintf(stderr, "clers decode: invalid character '%c' at position %d (alphabet: ABCDE)\n", t, ptr-1);
+            return 0;
         }
+    }
+
+    if (ptr != n) {
+        fprintf(stderr, "clers decode: %d trailing characters after decode\n", n - ptr);
+        return 0;
+    }
+    if (ndq != 1) {
+        fprintf(stderr, "clers decode: %d subtrees on stack at end (expected 1)\n", ndq);
+        return 0;
     }
 
     /* relabel */
