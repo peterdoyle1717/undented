@@ -55,23 +55,11 @@ static int parse_obj_fp(FILE *fp) {
     return NV > 0 && NF > 0;
 }
 
-static double signed_volume(void) {
-    double vol = 0;
-    for (int i = 0; i < NF; i++) {
-        int a = FA[i], b = FB[i], c = FC[i];
-        vol += VX[a]*(VY[b]*VZ[c] - VZ[b]*VY[c])
-             + VY[a]*(VZ[b]*VX[c] - VX[b]*VZ[c])
-             + VZ[a]*(VX[b]*VY[c] - VY[b]*VX[c]);
-    }
-    return vol / 6.0;
-}
-
-static void build(int flip) {
+static void build(void) {
     memset(EM, 0, sizeof(EM));
     memset(NNBR, 0, sizeof(NNBR));
     for (int i = 0; i < NF; i++) {
         int a = FA[i], b = FB[i], c = FC[i];
-        if (flip) { int t = b; b = c; c = t; }
         EM[a][b] = c; EM[b][c] = a; EM[c][a] = b;
         nbr_add(a, b); nbr_add(b, a);
         nbr_add(b, c); nbr_add(c, b);
@@ -255,7 +243,7 @@ static int process(FILE *fp, const char *name) {
         fprintf(stderr, "bad input: %s\n", name ? name : "(stdin)");
         return 1;
     }
-    if (signed_volume() < 0) build(1); else build(0);
+    build();
 
     double dent   = calc_dent();
     int    embed  = calc_embed();
